@@ -41,26 +41,50 @@ function core_question_output_fragment_tags_form($args) {
         require_once($CFG->dirroot . '/question/type/tags_form.php');
         require_once($CFG->libdir . '/questionlib.php');
         $id = clean_param($args['id'], PARAM_INT);
+        $editingcontext = $args['context'];
 
+        // Load the question and some related information.
         $question = $DB->get_record('question', ['id' => $id]);
-        $category = $DB->get_record('question_categories', array('id' => $question->category));
-        $context = \context::instance_by_id($category->contextid);
 
-        $toform = new stdClass();
-        $toform->id = $question->id;
-        $toform->questioncategory = $category->name;
-        $toform->questionname = $question->name;
-        $toform->categoryid = $category->id;
-        $toform->contextid = $category->contextid;
-        $toform->context = $context->get_context_name();
-
-        if (core_tag_tag::is_enabled('core_question', 'question')) {
-            $toform->tags = core_tag_tag::get_item_tags_array('core_question', 'question', $question->id);
+        if ($coursecontext = $editingcontext->get_course_context(false)) {
+            $course = $DB->get_record('course', ['id' => $coursecontext->instanceid]);
+            $filtercourses = [$course];
+        } else {
+            $filtercourses = null;
         }
 
+        $category = $DB->get_record('question_categories', ['id' => $question->category]);
+        $questioncontext = \context::instance_by_id($category->contextid);
+        $contexts = new \question_edit_contexts($editingcontext);
+
+        // Load the question tags and filter the course tags by the current course.
+        if (core_tag_tag::is_enabled('core_question', 'question')) {
+            $tagobjectsbyquestion = core_tag_tag::get_items_tags('core_question', 'question', [$question->id]);
+            if (!empty($tagobjectsbyquestion[$question->id])) {
+                $tagobjects = $tagobjectsbyquestion[$question->id];
+                $sortedtagobjects = question_sort_tags($tagobjects,
+                        context::instance_by_id($category->contextid), $filtercourses);
+            }
+        }
+        $formoptions = [
+            'editingcontext' => $editingcontext,
+            'questioncontext' => $questioncontext,
+            'contexts' => $contexts->all()
+        ];
+        $data = [
+            'id' => $question->id,
+            'questioncategory' => $category->name,
+            'questionname' => $question->name,
+            'categoryid' => $category->id,
+            'contextid' => $category->contextid,
+            'context' => $questioncontext->get_context_name(),
+            'tags' => $sortedtagobjects->tags ?? [],
+            'coursetags' => $sortedtagobjects->coursetags ?? [],
+        ];
+
         $cantag = question_has_capability_on($question, 'tag');
-        $mform = new \core_question\form\tags(null, null, 'post', '', null, $cantag, $toform);
-        $mform->set_data($toform);
+        $mform = new \core_question\form\tags(null, $formoptions, 'post', '', null, $cantag, $data);
+        $mform->set_data($data);
 
         return $mform->render();
     }

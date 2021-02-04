@@ -23,6 +23,7 @@
  * @license    http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  */
 
+$string['access'] = 'Access';
 $string['both'] = 'Internal and external';
 $string['cachedef_folder'] = 'OneDrive file IDs for folders in the system account';
 $string['configplugin'] = 'Configure OneDrive plugin';
@@ -38,7 +39,7 @@ $string['mysitenotfound'] = 'You have never logged into OneDrive before. You mus
 $string['oauth2serviceslink'] = '<a href="{$a}" title="Link to OAuth 2 services configuration">OAuth 2 services configuration</a>';
 $string['owner'] = 'Owned by: {$a}';
 $string['pluginname'] = 'Microsoft OneDrive';
-$string['removetempaccesstask'] = 'Remove temporary write access from controlled links.';
+$string['removetempaccesstask'] = 'Remove temporary write access from controlled links';
 $string['searchfor'] = 'Search for {$a}';
 $string['servicenotenabled'] = 'Access not configured.';
 $string['skydrivefilesexist'] = 'Files found in the Microsoft SkyDrive repository. This repository has been deprecated by Microsoft, however the files may be imported to the Microsoft OneDrive repository.';
@@ -46,3 +47,10 @@ $string['skydrivefilesimported'] = 'All files were imported from the Microsoft S
 $string['skydrivefilesnotimported'] = 'Some files could not be imported from the Microsoft SkyDrive repository.';
 $string['onedrive:view'] = 'View OneDrive repository';
 $string['supportedreturntypes'] = 'Supported files';
+$string['privacy:metadata:repository_onedrive'] = 'The Microsoft OneDrive repository stores temporary access grants, and transmits user data from Moodle to the remote system.';
+$string['privacy:metadata:repository_onedrive:searchtext'] = 'The Microsoft OneDrive repository user search text query.';
+$string['privacy:metadata:repository_onedrive:repository_onedrive_access:itemid'] = 'The Microsoft OneDrive with a temporary access grant item ID.';
+$string['privacy:metadata:repository_onedrive:repository_onedrive_access:permissionid'] = 'The Microsoft OneDrive temporary access grant permission ID.';
+$string['privacy:metadata:repository_onedrive:repository_onedrive_access:timecreated'] = 'The Microsoft OneDrive temporary access grant creation date/time.';
+$string['privacy:metadata:repository_onedrive:repository_onedrive_access:timemodified'] = 'The Microsoft OneDrive temporary access grant modification date/time.';
+$string['privacy:metadata:repository_onedrive:repository_onedrive_access:usermodified'] = 'The ID of the user modifying the Microsoft OneDrive temporary access grant.';

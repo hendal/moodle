@@ -26,8 +26,8 @@
 defined('MOODLE_INTERNAL') || die();
 
 $plugin->component = 'qtype_truefalse';
-$plugin->version   = 2017111300;
+$plugin->version   = 2021052500;
 
-$plugin->requires  = 2017110800;
+$plugin->requires  = 2021052500;
 
 $plugin->maturity  = MATURITY_STABLE;

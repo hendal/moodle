@@ -454,15 +454,13 @@ class auth_plugin_db extends auth_plugin_base {
                 $user->confirmed  = 1;
                 $user->auth       = $this->authtype;
                 $user->mnethostid = $CFG->mnet_localhost_id;
-                if (empty($user->lang)) {
-                    $user->lang = $CFG->lang;
-                }
+
                 if ($collision = $DB->get_record_select('user', "username = :username AND mnethostid = :mnethostid AND auth <> :auth", array('username'=>$user->username, 'mnethostid'=>$CFG->mnet_localhost_id, 'auth'=>$this->authtype), 'id,username,auth')) {
                     $trace->output(get_string('auth_dbinsertuserduplicate', 'auth_db', array('username'=>$user->username, 'auth'=>$collision->auth)), 1);
                     continue;
                 }
                 try {
-                    $id = user_create_user($user, false); // It is truly a new user.
+                    $id = user_create_user($user, false, false); // It is truly a new user.
                     $trace->output(get_string('auth_dbinsertuser', 'auth_db', array('name'=>$user->username, 'id'=>$id)), 1);
                 } catch (moodle_exception $e) {
                     $trace->output(get_string('auth_dbinsertusererror', 'auth_db', $user->username), 1);
@@ -473,8 +471,16 @@ class auth_plugin_db extends auth_plugin_base {
                     set_user_preference('auth_forcepasswordchange', 1, $id);
                     set_user_preference('create_password',          1, $id);
                 }
+
+                // Save custom profile fields here.
+                require_once($CFG->dirroot . '/user/profile/lib.php');
+                $user->id = $id;
+                profile_save_data($user);
+
                 // Make sure user context is present.
                 context_user::instance($id);
+
+                \core\event\user_created::create_from_userid($id)->trigger();
             }
             unset($add_users);
         }
@@ -597,9 +603,12 @@ class auth_plugin_db extends auth_plugin_base {
             }
         }
         if (!empty($update)) {
-            $authdb->Execute("UPDATE {$this->config->table}
-                                 SET ".implode(',', $update)."
-                               WHERE {$this->config->fielduser}='".$this->ext_addslashes($extusername)."'");
+            $sql = "UPDATE {$this->config->table}
+                       SET ".implode(',', $update)."
+                     WHERE {$this->config->fielduser} = ?";
+            if (!$authdb->Execute($sql, array($this->ext_addslashes($extusername)))) {
+                print_error('auth_dbupdateerror', 'auth_db');
+            }
         }
         $authdb->Close();
         return true;
@@ -709,12 +718,12 @@ class auth_plugin_db extends auth_plugin_base {
         raise_memory_limit(MEMORY_HUGE);
 
         if (empty($this->config->table)) {
-            echo $OUTPUT->notification('External table not specified.', 'notifyproblem');
+            echo $OUTPUT->notification(get_string('auth_dbnoexttable', 'auth_db'), 'notifyproblem');
             return;
         }
 
         if (empty($this->config->fielduser)) {
-            echo $OUTPUT->notification('External user field not specified.', 'notifyproblem');
+            echo $OUTPUT->notification(get_string('auth_dbnouserfield', 'auth_db'), 'notifyproblem');
             return;
         }
 
@@ -735,7 +744,7 @@ class auth_plugin_db extends auth_plugin_base {
             error_reporting($CFG->debug);
             ob_end_flush();
 
-            echo $OUTPUT->notification('Cannot connect the database.', 'notifyproblem');
+            echo $OUTPUT->notification(get_string('auth_dbcannotconnect', 'auth_db'), 'notifyproblem');
             return;
         }
 
@@ -744,17 +753,17 @@ class auth_plugin_db extends auth_plugin_base {
                                 WHERE {$this->config->fielduser} <> 'random_unlikely_username'"); // Any unlikely name is ok here.
 
         if (!$rs) {
-            echo $OUTPUT->notification('Can not read external table.', 'notifyproblem');
+            echo $OUTPUT->notification(get_string('auth_dbcannotreadtable', 'auth_db'), 'notifyproblem');
 
         } else if ($rs->EOF) {
-            echo $OUTPUT->notification('External table is empty.', 'notifyproblem');
+            echo $OUTPUT->notification(get_string('auth_dbtableempty', 'auth_db'), 'notifyproblem');
             $rs->close();
 
         } else {
             $fields_obj = $rs->FetchObj();
             $columns = array_keys((array)$fields_obj);
 
-            echo $OUTPUT->notification('External table contains following columns:<br />'.implode(', ', $columns), 'notifysuccess');
+            echo $OUTPUT->notification(get_string('auth_dbcolumnlist', 'auth_db', implode(', ', $columns)), 'notifysuccess');
             $rs->close();
         }
 

@@ -68,7 +68,7 @@ class enrol_cohort_plugin extends enrol_plugin {
             }
             $cohortname = format_string($cohort->name, true, array('context'=>context::instance_by_id($cohort->contextid)));
             if ($role = $DB->get_record('role', array('id'=>$instance->roleid))) {
-                $role = role_get_name($role, context_course::instance($instance->courseid, IGNORE_MISSING));
+                $role = role_get_name($role, context_course::instance($instance->courseid, IGNORE_MISSING), ROLENAME_BOTH);
                 return get_string('pluginname', 'enrol_'.$enrol) . ' (' . $cohortname . ' - ' . $role .')';
             } else {
                 return get_string('pluginname', 'enrol_'.$enrol) . ' (' . $cohortname . ')';
@@ -159,19 +159,6 @@ class enrol_cohort_plugin extends enrol_plugin {
         $trace->finished();
 
         return $result;
-    }
-
-    /**
-     * Called for all enabled enrol plugins that returned true from is_cron_required().
-     * @return void
-     */
-    public function cron() {
-        global $CFG;
-
-        require_once("$CFG->dirroot/enrol/cohort/locallib.php");
-        $trace = new null_progress_trace();
-        enrol_cohort_sync($trace);
-        $trace->finished();
     }
 
     /**
@@ -377,13 +364,14 @@ class enrol_cohort_plugin extends enrol_plugin {
     protected function get_role_options($instance, $coursecontext) {
         global $DB;
 
-        $roles = get_assignable_roles($coursecontext);
+        $roles = get_assignable_roles($coursecontext, ROLENAME_BOTH);
         $roles[0] = get_string('none');
         $roles = array_reverse($roles, true); // Descending default sortorder.
+
+        // If the instance is already configured, but the configured role is no longer assignable in the course then add it back.
         if ($instance->id and !isset($roles[$instance->roleid])) {
             if ($role = $DB->get_record('role', array('id' => $instance->roleid))) {
-                $roles = role_fix_names($roles, $coursecontext, ROLENAME_ALIAS, true);
-                $roles[$instance->roleid] = role_get_name($role, $coursecontext);
+                $roles[$instance->roleid] = role_get_name($role, $coursecontext, ROLENAME_BOTH);
             } else {
                 $roles[$instance->roleid] = get_string('error');
             }
@@ -437,8 +425,9 @@ class enrol_cohort_plugin extends enrol_plugin {
         $options = $this->get_status_options();
         $mform->addElement('select', 'status', get_string('status', 'enrol_cohort'), $options);
 
-        $options = $this->get_cohort_options($instance, $coursecontext);
-        $mform->addElement('select', 'customint1', get_string('cohort', 'cohort'), $options);
+        $options = ['contextid' => $coursecontext->id, 'multiple' => false];
+        $mform->addElement('cohort', 'customint1', get_string('cohort', 'cohort'), $options);
+
         if ($instance->id) {
             $mform->setConstant('customint1', $instance->customint1);
             $mform->hardFreeze('customint1', $instance->customint1);

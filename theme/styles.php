@@ -44,12 +44,6 @@ if ($slashargument = min_get_slash_argument()) {
         $usesvg = true;
     }
 
-    $chunk = null;
-    if (preg_match('#/(chunk(\d+)(/|$))#', $slashargument, $matches)) {
-        $chunk = (int)$matches[2];
-        $slashargument = str_replace($matches[1], '', $slashargument);
-    }
-
     list($themename, $rev, $type) = explode('/', $slashargument, 3);
     $themename = min_clean_param($themename, 'SAFEDIR');
     $rev       = min_clean_param($rev, 'RAW');
@@ -59,7 +53,6 @@ if ($slashargument = min_get_slash_argument()) {
     $themename = min_optional_param('theme', 'standard', 'SAFEDIR');
     $rev       = min_optional_param('rev', 0, 'RAW');
     $type      = min_optional_param('type', 'all', 'SAFEDIR');
-    $chunk     = min_optional_param('chunk', null, 'INT');
     $usesvg    = (bool)min_optional_param('svg', '1', 'INT');
 }
 
@@ -74,12 +67,7 @@ if (!is_null($themesubrev)) {
 }
 
 // Check that type fits into the expected values.
-if ($type === 'editor') {
-    // The editor CSS is never chunked.
-    $chunk = null;
-} else if ($type === 'all' || $type === 'all-rtl') {
-    // We're fine.
-} else {
+if (!in_array($type, ['all', 'all-rtl', 'editor'])) {
     css_send_css_not_found();
 }
 
@@ -94,16 +82,15 @@ if (file_exists("$CFG->dirroot/theme/$themename/config.php")) {
 
 $candidatedir = "$CFG->localcachedir/theme/$rev/$themename/css";
 $candidatesheet = "{$candidatedir}/" . theme_styles_get_filename($type, $themesubrev, $usesvg);
-$chunkedcandidatesheet = "{$candidatedir}/" . theme_styles_get_filename($type, $themesubrev, $usesvg, $chunk);
-$etag = theme_styles_get_etag($themename, $rev, $type, $themesubrev, $usesvg, $chunk);
+$etag = theme_styles_get_etag($themename, $rev, $type, $themesubrev, $usesvg);
 
-if (file_exists($chunkedcandidatesheet)) {
+if (file_exists($candidatesheet)) {
     if (!empty($_SERVER['HTTP_IF_NONE_MATCH']) || !empty($_SERVER['HTTP_IF_MODIFIED_SINCE'])) {
         // We do not actually need to verify the etag value because our files
         // never change in cache because we increment the rev counter.
-        css_send_unmodified(filemtime($chunkedcandidatesheet), $etag);
+        css_send_unmodified(filemtime($candidatesheet), $etag);
     }
-    css_send_cached_css($chunkedcandidatesheet, $etag);
+    css_send_cached_css($candidatesheet, $etag);
 }
 
 // Ok, now we need to start normal moodle script, we need to load all libs and $DB.
@@ -128,12 +115,12 @@ $cache = true;
 // likely being regenerated.
 if ($themerev <= 0 or $themerev != $rev or $themesubrev != $currentthemesubrev) {
     $rev = $themerev;
+    $themesubrev = $currentthemesubrev;
     $cache = false;
 
     $candidatedir = "$CFG->localcachedir/theme/$rev/$themename/css";
     $candidatesheet = "{$candidatedir}/" . theme_styles_get_filename($type, $themesubrev, $usesvg);
-    $chunkedcandidatesheet = "{$candidatedir}/" . theme_styles_get_filename($type, $themesubrev, $usesvg, $chunk);
-    $etag = theme_styles_get_etag($themename, $rev, $type, $themesubrev, $usesvg, $chunk);
+    $etag = theme_styles_get_etag($themename, $rev, $type, $themesubrev, $usesvg);
 }
 
 make_localcache_directory('theme', false);
@@ -142,7 +129,7 @@ if ($type === 'editor') {
     $csscontent = $theme->get_css_content_editor();
 
     if ($cache) {
-        css_store_css($theme, $candidatesheet, $csscontent, false);
+        css_store_css($theme, $candidatesheet, $csscontent);
         css_send_cached_css($candidatesheet, $etag);
     } else {
         css_send_uncached_css($csscontent);
@@ -178,11 +165,10 @@ $lock = $lockfactory->get_lock($themename, $locktimeout);
 
 if ($sendaftergeneration || $lock) {
     // Either the lock was successful, or the lock was unsuccessful but the content *must* be sent.
-    if (!file_exists($chunkedcandidatesheet)) {
-        // The content does not exist locally.
-        // Generate and save it.
-        $candidatesheet = theme_styles_generate_and_store($theme, $rev, $themesubrev, $candidatedir);
-    }
+
+    // The content does not exist locally.
+    // Generate and save it.
+    $candidatesheet = theme_styles_generate_and_store($theme, $rev, $themesubrev, $candidatedir);
 
     if ($lock) {
         $lock->release();
@@ -193,10 +179,6 @@ if ($sendaftergeneration || $lock) {
             // Do not pollute browser caches if invalid revision requested,
             // let's ignore legacy IE breakage here too.
             css_send_uncached_css(file_get_contents($candidatesheet));
-
-        } else if ($chunk !== null and file_exists($chunkedcandidatesheet)) {
-            // Greetings stupid legacy IEs!
-            css_send_cached_css($chunkedcandidatesheet, $etag);
 
         } else {
             // Real browsers - this is the expected result!
@@ -212,10 +194,11 @@ if ($sendaftergeneration || $lock) {
  * @param   int             $rev The theme revision
  * @param   int             $themesubrev The theme sub-revision
  * @param   string          $candidatedir The directory that it should be stored in
- * @return  string          The path that the primary (non-chunked) CSS was written to
+ * @return  string          The path that the primary CSS was written to
  */
 function theme_styles_generate_and_store($theme, $rev, $themesubrev, $candidatedir) {
     global $CFG;
+    require_once("{$CFG->libdir}/filelib.php");
 
     // Generate the content first.
     if (!$csscontent = $theme->get_css_cached_content()) {
@@ -230,35 +213,39 @@ function theme_styles_generate_and_store($theme, $rev, $themesubrev, $candidated
     }
 
     // Determine the candidatesheet path.
-    // Note: Do not pass any value for chunking as this is calcualted during css storage.
     $candidatesheet = "{$candidatedir}/" . theme_styles_get_filename($type, $themesubrev, $theme->use_svg_icons());
 
-    // Determine the chunking URL.
-    // Note, this will be removed when support for IE9 is removed.
-    $relroot = preg_replace('|^http.?://[^/]+|', '', $CFG->wwwroot);
-    if (!empty(min_get_slash_argument())) {
-        if ($theme->use_svg_icons()) {
-            $chunkurl = "{$relroot}/theme/styles.php/{$theme->name}/{$rev}/$type";
-        } else {
-            $chunkurl = "{$relroot}/theme/styles.php/_s/{$theme->name}/{$rev}/$type";
-        }
-    } else {
-        if ($theme->use_svg_icons()) {
-            $chunkurl = "{$relroot}/theme/styles.php?theme={$theme->name}&rev={$rev}&type=$type";
-        } else {
-            $chunkurl = "{$relroot}/theme/styles.php?theme={$theme->name}&rev={$rev}&type=$type&svg=0";
-        }
-    }
-
     // Store the CSS.
-    css_store_css($theme, $candidatesheet, $csscontent, true, $chunkurl);
+    css_store_css($theme, $candidatesheet, $csscontent);
 
     // Store the fallback CSS in the temp directory.
     // This file is used as a fallback when waiting for a theme to compile and is not versioned in any way.
     $fallbacksheet = make_temp_directory("theme/{$theme->name}")
         . "/"
         . theme_styles_get_filename($type, 0, $theme->use_svg_icons());
-    css_store_css($theme, $fallbacksheet, $csscontent, true, $chunkurl);
+    css_store_css($theme, $fallbacksheet, $csscontent);
+
+    // Delete older revisions from localcache.
+    $themecachedirs = glob("{$CFG->localcachedir}/theme/*", GLOB_ONLYDIR);
+    foreach ($themecachedirs as $localcachedir) {
+        $cachedrev = [];
+        preg_match("/\/theme\/([0-9]+)$/", $localcachedir, $cachedrev);
+        $cachedrev = isset($cachedrev[1]) ? intval($cachedrev[1]) : 0;
+        if ($cachedrev > 0 && $cachedrev < $rev) {
+            fulldelete($localcachedir);
+        }
+    }
+
+    // Delete older theme subrevision CSS from localcache.
+    $subrevfiles = glob("{$CFG->localcachedir}/theme/{$rev}/{$theme->name}/css/*.css");
+    foreach ($subrevfiles as $subrevfile) {
+        $cachedsubrev = [];
+        preg_match("/_([0-9]+)\.([0-9]+\.)?css$/", $subrevfile, $cachedsubrev);
+        $cachedsubrev = isset($cachedsubrev[1]) ? intval($cachedsubrev[1]) : 0;
+        if ($cachedsubrev > 0 && $cachedsubrev < $themesubrev) {
+            fulldelete($subrevfile);
+        }
+    }
 
     return $candidatesheet;
 }
@@ -294,14 +281,12 @@ function theme_styles_fallback_content($theme) {
  * @param   string  $type The requested sheet type
  * @param   int     $themesubrev The theme sub-revision
  * @param   bool    $usesvg Whether SVGs are allowed
- * @param   int     $chunk The chunk number if specified
  * @return  string  The filename for this sheet
  */
-function theme_styles_get_filename($type, $themesubrev = 0, $usesvg = true, $chunk = null) {
+function theme_styles_get_filename($type, $themesubrev = 0, $usesvg = true) {
     $filename = $type;
     $filename .= ($themesubrev > 0) ? "_{$themesubrev}" : '';
     $filename .= $usesvg ? '' : '-nosvg';
-    $filename .= $chunk ? ".{$chunk}" : '';
 
     return "{$filename}.css";
 }
@@ -314,18 +299,13 @@ function theme_styles_get_filename($type, $themesubrev = 0, $usesvg = true, $chu
  * @param   string  $type The requested sheet type
  * @param   int     $themesubrev The theme sub-revision
  * @param   bool    $usesvg Whether SVGs are allowed
- * @param   int     $chunk The chunk number if specified
  * @return  string  The etag to use for this request
  */
-function theme_styles_get_etag($themename, $rev, $type, $themesubrev, $usesvg, $chunk) {
+function theme_styles_get_etag($themename, $rev, $type, $themesubrev, $usesvg) {
     $etag = [$rev, $themename, $type, $themesubrev];
 
     if (!$usesvg) {
         $etag[] = 'nosvg';
-    }
-
-    if ($chunk) {
-        $etag[] = "chunk{$chunk}";
     }
 
     return sha1(implode('/', $etag));

@@ -2,7 +2,7 @@
 /**
  * Copyright 2014-2017 Horde LLC (http://www.horde.org/)
  *
- * See the enclosed file COPYING for license information (BSD). If you
+ * See the enclosed file LICENSE for license information (BSD). If you
  * did not receive this file, see http://www.horde.org/licenses/bsd.
  *
  * @author   Michael Slusarz <slusarz@horde.org>
@@ -88,6 +88,9 @@ class Horde_Idna
      */
     protected static function _checkForError($info)
     {
+        if (!isset($info['errors'])) {
+            return;
+        }
         switch (true) {
         case $info['errors'] & IDNA_ERROR_EMPTY_LABEL:
             throw new Horde_Idna_Exception(Horde_Idna_Translation::t(

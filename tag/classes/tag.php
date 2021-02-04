@@ -81,7 +81,7 @@ class core_tag_tag {
      */
     protected function __construct($record) {
         if (empty($record->id)) {
-            throw new coding_exeption("Record must contain at least field 'id'");
+            throw new coding_exception("Record must contain at least field 'id'");
         }
         $this->record = $record;
     }
@@ -209,7 +209,7 @@ class core_tag_tag {
     }
 
     /**
-     * Simple function to just return a single tag object by its id
+     * Simple function to just return an array of tag objects by their ids
      *
      * @param    int[]  $ids
      * @param    string $returnfields which fields do we want returned from table {tag}.
@@ -648,7 +648,8 @@ class core_tag_tag {
      * @param int[] $itemids
      * @param int $standardonly wether to return only standard tags or any
      * @param int $tiuserid tag instance user id, only needed for tag areas with user tagging
-     * @return core_tag_tag[] each object contains additional fields taginstanceid, taginstancecontextid and ordering
+     * @return core_tag_tag[][] first array key is itemid. For each itemid,
+     *      an array tagid => tag object with additional fields taginstanceid, taginstancecontextid and ordering
      */
     public static function get_items_tags($component, $itemtype, $itemids, $standardonly = self::BOTH_STANDARD_AND_NOT,
             $tiuserid = 0) {
@@ -752,7 +753,7 @@ class core_tag_tag {
     public static function set_item_tags($component, $itemtype, $itemid, context $context, $tagnames, $tiuserid = 0) {
         if ($itemtype === 'tag') {
             if ($tiuserid) {
-                throw new coding_exeption('Related tags can not have tag instance userid');
+                throw new coding_exception('Related tags can not have tag instance userid');
             }
             debugging('You can not use set_item_tags() for tagging a tag, please use set_related_tags()', DEBUG_DEVELOPER);
             static::get($itemid, '*', MUST_EXIST)->set_related_tags($tagnames);
@@ -907,7 +908,7 @@ class core_tag_tag {
         }
 
         $ordering = $DB->get_field_sql('SELECT MAX(ordering) FROM {tag_instance} ti
-                WHERE ti.itemtype = :itemtype AND ti.itemid = itemid AND
+                WHERE ti.itemtype = :itemtype AND ti.itemid = :itemid AND
                 ti.component = :component' . $usersql, $params);
 
         return $tag->add_instance($component, $itemtype, $itemid, $context, $ordering + 1, $tiuserid);
@@ -1754,15 +1755,16 @@ class core_tag_tag {
         list($contextsql, $contextsqlparams) = $DB->get_in_or_equal($contextids);
         $params = array_merge($params, $contextsqlparams);
 
-        $subsql = "SELECT tagid
-                   FROM {tag_instance}
+        $subsql = "SELECT DISTINCT t.id
+                    FROM {tag} t
+                    JOIN {tag_instance} ti ON t.id = ti.tagid
                    WHERE component = ?
                    AND itemtype = ?
-                   AND contextid {$contextsql}
-                   GROUP BY tagid";
-        $sql = "SELECT *
-                FROM {tag}
-                WHERE id IN ({$subsql})";
+                   AND contextid {$contextsql}";
+
+        $sql = "SELECT tt.*
+                FROM ($subsql) tv
+                JOIN {tag} tt ON tt.id = tv.id";
 
         return array_map(function($record) {
             return new core_tag_tag($record);

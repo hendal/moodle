@@ -84,6 +84,26 @@ class student_enrolments extends \core_analytics\local\analyser\by_course {
     }
 
     /**
+     * We need to delete associated data if a user requests his data to be deleted.
+     *
+     * @return bool
+     */
+    public function processes_user_data() {
+        return true;
+    }
+
+    /**
+     * Join the samples origin table with the user id table.
+     *
+     * @param string $sampletablealias
+     * @return string
+     */
+    public function join_sample_user($sampletablealias) {
+        return "JOIN {user_enrolments} ue ON {$sampletablealias}.sampleid = ue.id " .
+               "JOIN {user} u ON u.id = ue.userid";
+    }
+
+    /**
      * All course student enrolments.
      *
      * It does return all student enrolments including the suspended ones.
@@ -91,7 +111,7 @@ class student_enrolments extends \core_analytics\local\analyser\by_course {
      * @param \core_analytics\analysable $course
      * @return array
      */
-    protected function get_all_samples(\core_analytics\analysable $course) {
+    public function get_all_samples(\core_analytics\analysable $course) {
 
         $enrolments = enrol_get_course_users($course->get_id());
 

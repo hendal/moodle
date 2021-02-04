@@ -5,7 +5,7 @@ namespace Horde\Socket;
 /**
  * Copyright 2013-2017 Horde LLC (http://www.horde.org/)
  *
- * See the enclosed file COPYING for license information (LGPL). If you
+ * See the enclosed file LICENSE for license information (LGPL). If you
  * did not receive this file, see http://www.horde.org/licenses/lgpl21.
  *
  * @category  Horde
@@ -91,7 +91,7 @@ class Client
             $secure = false;
         }
 
-        $context = array_merge_recursive(
+        $context = array_replace_recursive(
             array(
                 'ssl' => array(
                     'verify_peer' => false,
@@ -301,7 +301,7 @@ class Client
              * these are likely transient issues. Retry up to 3 times in these
              * instances. */
             if (!$error_number && ($retries < 3)) {
-                return $this->_connect($host, $port, $timeout, $secure, ++$retries, $context);
+                return $this->_connect($host, $port, $timeout, $secure, $context, ++$retries);
             }
 
             $e = new Client\Exception(

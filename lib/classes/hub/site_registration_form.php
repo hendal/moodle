@@ -32,7 +32,7 @@ global $CFG;
 require_once($CFG->libdir . '/formslib.php');
 
 /**
- * The site registration form. Information will be sent to moodle.net
+ * The site registration form. Information will be sent to the sites directory.
  *
  * @author     Jerome Mouneyrac <jerome@mouneyrac.com>
  * @package    core
@@ -64,7 +64,8 @@ class site_registration_form extends \moodleform {
             'language' => explode('_', current_language())[0],
             'geolocation' => '',
             'emailalert' => 1,
-            'commnews' => 1
+            'commnews' => 1,
+            'policyagreed' => 0
 
         ]);
 
@@ -74,7 +75,7 @@ class site_registration_form extends \moodleform {
         $mform->addElement('header', 'moodle', get_string('registrationinfo', 'hub'));
 
         $mform->addElement('text', 'name', get_string('sitename', 'hub'),
-            array('class' => 'registration_textfield'));
+            array('class' => 'registration_textfield', 'maxlength' => 255));
         $mform->setType('name', PARAM_TEXT);
         $mform->addHelpButton('name', 'sitename', 'hub');
 
@@ -151,21 +152,25 @@ class site_registration_form extends \moodleform {
         $mform->addElement('hidden', 'imageurl', ''); // TODO: temporary.
         $mform->setType('imageurl', PARAM_URL);
 
+        $mform->addElement('checkbox', 'policyagreed', get_string('policyagreed', 'hub'),
+            get_string('policyagreeddesc', 'hub', HUB_MOODLEORGHUBURL . '/privacy'));
+        $mform->addRule('policyagreed', $strrequired, 'required', null, 'client');
+
         $mform->addElement('header', 'sitestats', get_string('sendfollowinginfo', 'hub'));
         $mform->setExpanded('sitestats', !empty($highlightfields));
         $mform->addElement('static', 'urlstring', get_string('siteurl', 'hub'), $siteinfo['url']);
         $mform->addHelpButton('urlstring', 'siteurl', 'hub');
 
-        // Display statistic that are going to be retrieve by moodle.net.
+        // Display statistic that are going to be retrieve by the sites directory.
         $mform->addElement('static', 'siteinfosummary', get_string('sendfollowinginfo', 'hub'), registration::get_stats_summary($siteinfo));
 
         // Check if it's a first registration or update.
         if (registration::is_registered()) {
-            $buttonlabel = get_string('updatesite', 'hub', 'Moodle.net');
+            $buttonlabel = get_string('updatesiteregistration', 'core_hub');
             $mform->addElement('hidden', 'update', true);
             $mform->setType('update', PARAM_BOOL);
         } else {
-            $buttonlabel = get_string('registersite', 'hub', 'Moodle.net');
+            $buttonlabel = get_string('register', 'core_admin');
         }
 
         $this->add_action_buttons(false, $buttonlabel);
@@ -182,7 +187,9 @@ class site_registration_form extends \moodleform {
         if (empty($siteinfo['commnewsnewemail'])) {
             $siteinfo['commnewsemail'] = '';
         }
-        $this->set_data($siteinfo);
+
+        // Set data. Always require to check policyagreed even if it was checked earlier.
+        $this->set_data(['policyagreed' => 0] + $siteinfo);
     }
 
     /**
@@ -262,7 +269,8 @@ class site_registration_form extends \moodleform {
 
             if (debugging('', DEBUG_DEVELOPER)) {
                 // Display debugging message for developers who added fields to the form and forgot to add them to registration::FORM_FIELDS.
-                $keys = array_diff(array_keys((array)$data), ['returnurl', 'mform_isexpanded_id_sitestats', 'submitbutton', 'update']);
+                $keys = array_diff(array_keys((array)$data),
+                    ['returnurl', 'mform_isexpanded_id_sitestats', 'submitbutton', 'update']);
                 if ($extrafields = array_diff($keys, registration::FORM_FIELDS)) {
                     debugging('Found extra fields in the form results: ' . join(', ', $extrafields), DEBUG_DEVELOPER);
                 }

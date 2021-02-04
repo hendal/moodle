@@ -1,13 +1,9 @@
 PHP CSS Parser
 --------------
 
-Import git ref: c3b01ef0a85824e86fd86a74a8154d8d5c34b0ff
-                (master)
-
-Downloaded from: https://github.com/sabberworm/PHP-CSS-Parser
-
 Import procedure:
-
-- Copy all the files from the folder 'lib/Sabberworm/CSS/' in this directory.
-
-- Apply the patch in Sabberworm/PHP-CSS-Parser#115
+1. Download the latest release from https://github.com/sabberworm/PHP-CSS-Parser/releases
+2. Copy all the files from the folder 'lib/Sabberworm/CSS/' in this directory.
+3. Apply the following patches from the following pull requests if they have not yet been merged upstream:
+   a. https://github.com/sabberworm/PHP-CSS-Parser/pull/115
+   b. https://github.com/sabberworm/PHP-CSS-Parser/pull/173

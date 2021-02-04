@@ -34,13 +34,13 @@ class core_cohort_externallib_testcase extends externallib_advanced_testcase {
 
     /**
      * Test create_cohorts
-     *
-     * @expectedException required_capability_exception
      */
     public function test_create_cohorts() {
         global $USER, $CFG, $DB;
 
         $this->resetAfterTest(true);
+
+        set_config('allowcohortthemes', 1);
 
         $contextid = context_system::instance()->id;
         $category = $this->getDataGenerator()->create_category();
@@ -49,7 +49,8 @@ class core_cohort_externallib_testcase extends externallib_advanced_testcase {
             'categorytype' => array('type' => 'id', 'value' => $category->id),
             'name' => 'cohort test 1',
             'idnumber' => 'cohorttest1',
-            'description' => 'This is a description for cohorttest1'
+            'description' => 'This is a description for cohorttest1',
+            'theme' => 'classic'
             );
 
         $cohort2 = array(
@@ -68,6 +69,14 @@ class core_cohort_externallib_testcase extends externallib_advanced_testcase {
             );
         $roleid = $this->assignUserCapability('moodle/cohort:manage', $contextid);
 
+        $cohort4 = array(
+            'categorytype' => array('type' => 'id', 'value' => $category->id),
+            'name' => 'cohort test 4',
+            'idnumber' => 'cohorttest4',
+            'description' => 'This is a description for cohorttest4',
+            'theme' => 'classic'
+            );
+
         // Call the external function.
         $this->setCurrentTimeStart();
         $createdcohorts = core_cohort_external::create_cohorts(array($cohort1, $cohort2));
@@ -85,11 +94,15 @@ class core_cohort_externallib_testcase extends externallib_advanced_testcase {
                 $this->assertEquals($dbcohort->name, $cohort1['name']);
                 $this->assertEquals($dbcohort->description, $cohort1['description']);
                 $this->assertEquals($dbcohort->visible, 1); // Field was not specified, ensure it is visible by default.
+                // As $CFG->allowcohortthemes is enabled, theme must be initialised.
+                $this->assertEquals($dbcohort->theme, $cohort1['theme']);
             } else if ($createdcohort['idnumber'] == $cohort2['idnumber']) {
                 $this->assertEquals($dbcohort->contextid, context_system::instance()->id);
                 $this->assertEquals($dbcohort->name, $cohort2['name']);
                 $this->assertEquals($dbcohort->description, $cohort2['description']);
                 $this->assertEquals($dbcohort->visible, $cohort2['visible']);
+                // Although $CFG->allowcohortthemes is enabled, no theme is defined for this cohort.
+                $this->assertEquals($dbcohort->theme, '');
             } else {
                 $this->fail('Unrecognised cohort found');
             }
@@ -97,15 +110,31 @@ class core_cohort_externallib_testcase extends externallib_advanced_testcase {
             $this->assertTimeCurrent($dbcohort->timemodified);
         }
 
+        // Call when $CFG->allowcohortthemes is disabled.
+        set_config('allowcohortthemes', 0);
+        $createdcohorts = core_cohort_external::create_cohorts(array($cohort4));
+        $createdcohorts = external_api::clean_returnvalue(core_cohort_external::create_cohorts_returns(), $createdcohorts);
+        foreach ($createdcohorts as $createdcohort) {
+            $dbcohort = $DB->get_record('cohort', array('id' => $createdcohort['id']));
+            if ($createdcohort['idnumber'] == $cohort4['idnumber']) {
+                $conid = $DB->get_field('context', 'id', array('instanceid' => $cohort4['categorytype']['value'],
+                        'contextlevel' => CONTEXT_COURSECAT));
+                $this->assertEquals($dbcohort->contextid, $conid);
+                $this->assertEquals($dbcohort->name, $cohort4['name']);
+                $this->assertEquals($dbcohort->description, $cohort4['description']);
+                $this->assertEquals($dbcohort->visible, 1); // Field was not specified, ensure it is visible by default.
+                $this->assertEquals($dbcohort->theme, ''); // As $CFG->allowcohortthemes is disabled, theme must be empty.
+            }
+        }
+
         // Call without required capability.
         $this->unassignUserCapability('moodle/cohort:manage', $contextid, $roleid);
+        $this->expectException(required_capability_exception::class);
         $createdcohorts = core_cohort_external::create_cohorts(array($cohort3));
     }
 
     /**
      * Test delete_cohorts
-     *
-     * @expectedException required_capability_exception
      */
     public function test_delete_cohorts() {
         global $USER, $CFG, $DB;
@@ -132,6 +161,7 @@ class core_cohort_externallib_testcase extends externallib_advanced_testcase {
         $cohort1 = self::getDataGenerator()->create_cohort();
         $cohort2 = self::getDataGenerator()->create_cohort();
         $this->unassignUserCapability('moodle/cohort:manage', $contextid, $roleid);
+        $this->expectException(required_capability_exception::class);
         core_cohort_external::delete_cohorts(array($cohort1->id, $cohort2->id));
     }
 
@@ -143,11 +173,14 @@ class core_cohort_externallib_testcase extends externallib_advanced_testcase {
 
         $this->resetAfterTest(true);
 
+        set_config('allowcohortthemes', 1);
+
         $cohort1 = array(
             'contextid' => 1,
             'name' => 'cohortnametest1',
             'idnumber' => 'idnumbertest1',
-            'description' => 'This is a description for cohort 1'
+            'description' => 'This is a description for cohort 1',
+            'theme' => 'classic'
             );
         $cohort1 = self::getDataGenerator()->create_cohort($cohort1);
         $cohort2 = self::getDataGenerator()->create_cohort();
@@ -168,6 +201,7 @@ class core_cohort_externallib_testcase extends externallib_advanced_testcase {
                 $this->assertEquals($cohort1->name, $enrolledcohort['name']);
                 $this->assertEquals($cohort1->description, $enrolledcohort['description']);
                 $this->assertEquals($cohort1->visible, $enrolledcohort['visible']);
+                $this->assertEquals($cohort1->theme, $enrolledcohort['theme']);
             }
         }
 
@@ -181,17 +215,28 @@ class core_cohort_externallib_testcase extends externallib_advanced_testcase {
 
         // Check we retrieve the good total number of enrolled cohorts + no error on capability.
         $this->assertEquals(2, count($returnedcohorts));
+
+        // Check when allowcohortstheme is disabled, theme is not returned.
+        set_config('allowcohortthemes', 0);
+        $returnedcohorts = core_cohort_external::get_cohorts(array(
+            $cohort1->id));
+        $returnedcohorts = external_api::clean_returnvalue(core_cohort_external::get_cohorts_returns(), $returnedcohorts);
+        foreach ($returnedcohorts as $enrolledcohort) {
+            if ($enrolledcohort['idnumber'] == $cohort1->idnumber) {
+                $this->assertNull($enrolledcohort['theme']);
+            }
+        }
     }
 
     /**
      * Test update_cohorts
-     *
-     * @expectedException required_capability_exception
      */
     public function test_update_cohorts() {
         global $USER, $CFG, $DB;
 
         $this->resetAfterTest(true);
+
+        set_config('allowcohortthemes', 0);
 
         $cohort1 = self::getDataGenerator()->create_cohort(array('visible' => 0));
 
@@ -200,7 +245,8 @@ class core_cohort_externallib_testcase extends externallib_advanced_testcase {
             'categorytype' => array('type' => 'id', 'value' => '1'),
             'name' => 'cohortnametest1',
             'idnumber' => 'idnumbertest1',
-            'description' => 'This is a description for cohort 1'
+            'description' => 'This is a description for cohort 1',
+            'theme' => 'classic'
             );
 
         $context = context_system::instance();
@@ -217,6 +263,7 @@ class core_cohort_externallib_testcase extends externallib_advanced_testcase {
         $this->assertEquals($dbcohort->idnumber, $cohort1['idnumber']);
         $this->assertEquals($dbcohort->description, $cohort1['description']);
         $this->assertEquals($dbcohort->visible, 0);
+        $this->assertEmpty($dbcohort->theme);
 
         // Since field 'visible' was added in 2.8, make sure that update works correctly with and without this parameter.
         core_cohort_external::update_cohorts(array($cohort1 + array('visible' => 1)));
@@ -226,8 +273,21 @@ class core_cohort_externallib_testcase extends externallib_advanced_testcase {
         $dbcohort = $DB->get_record('cohort', array('id' => $cohort1['id']));
         $this->assertEquals(1, $dbcohort->visible);
 
+        // Call when $CFG->allowcohortthemes is enabled.
+        set_config('allowcohortthemes', 1);
+        core_cohort_external::update_cohorts(array($cohort1 + array('theme' => 'classic')));
+        $dbcohort = $DB->get_record('cohort', array('id' => $cohort1['id']));
+        $this->assertEquals('classic', $dbcohort->theme);
+
+        // Call when $CFG->allowcohortthemes is disabled.
+        set_config('allowcohortthemes', 0);
+        core_cohort_external::update_cohorts(array($cohort1 + array('theme' => 'boost')));
+        $dbcohort = $DB->get_record('cohort', array('id' => $cohort1['id']));
+        $this->assertEquals('classic', $dbcohort->theme);
+
         // Call without required capability.
         $this->unassignUserCapability('moodle/cohort:manage', $context->id, $roleid);
+        $this->expectException(required_capability_exception::class);
         core_cohort_external::update_cohorts(array($cohort1));
     }
 
@@ -249,7 +309,7 @@ class core_cohort_externallib_testcase extends externallib_advanced_testcase {
             core_cohort_external::update_cohorts(array($cohort1));
             $this->fail('Expecting invalid_parameter_exception exception, none occured');
         } catch (invalid_parameter_exception $e1) {
-            $this->assertContains('Invalid external api parameter: the value is "THIS IS NOT AN ID"', $e1->debuginfo);
+            $this->assertStringContainsString('Invalid external api parameter: the value is "THIS IS NOT AN ID"', $e1->debuginfo);
         }
 
         $cohort1['id'] = 9.999; // Also not a valid id of a cohort.
@@ -257,14 +317,12 @@ class core_cohort_externallib_testcase extends externallib_advanced_testcase {
             core_cohort_external::update_cohorts(array($cohort1));
             $this->fail('Expecting invalid_parameter_exception exception, none occured');
         } catch (invalid_parameter_exception $e2) {
-            $this->assertContains('Invalid external api parameter: the value is "9.999"', $e2->debuginfo);
+            $this->assertStringContainsString('Invalid external api parameter: the value is "9.999"', $e2->debuginfo);
         }
     }
 
     /**
      * Test update_cohorts without permission on the dest category.
-     *
-     * @expectedException required_capability_exception
      */
     public function test_update_cohorts_missing_dest() {
         global $USER, $CFG, $DB;
@@ -300,13 +358,12 @@ class core_cohort_externallib_testcase extends externallib_advanced_testcase {
 
         // Call the external function.
         // Should fail because we don't have permission on the dest category
+        $this->expectException(required_capability_exception::class);
         core_cohort_external::update_cohorts(array($cohortupdate));
     }
 
     /**
      * Test update_cohorts without permission on the src category.
-     *
-     * @expectedException required_capability_exception
      */
     public function test_update_cohorts_missing_src() {
         global $USER, $CFG, $DB;
@@ -342,13 +399,12 @@ class core_cohort_externallib_testcase extends externallib_advanced_testcase {
 
         // Call the external function.
         // Should fail because we don't have permission on the src category
+        $this->expectException(required_capability_exception::class);
         core_cohort_external::update_cohorts(array($cohortupdate));
     }
 
     /**
      * Test add_cohort_members
-     *
-     * @expectedException required_capability_exception
      */
     public function test_add_cohort_members() {
         global $DB;
@@ -394,13 +450,12 @@ class core_cohort_externallib_testcase extends externallib_advanced_testcase {
             'usertype' => array('type' => 'id', 'value' => '2')
             );
         $this->unassignUserCapability('moodle/cohort:assign', $contextid, $roleid);
+        $this->expectException(required_capability_exception::class);
         $addcohortmembers = core_cohort_external::add_cohort_members(array($cohort2));
     }
 
     /**
      * Test delete_cohort_members
-     *
-     * @expectedException required_capability_exception
      */
     public function test_delete_cohort_members() {
         global $DB;
@@ -452,6 +507,7 @@ class core_cohort_externallib_testcase extends externallib_advanced_testcase {
 
         // Call without required capability.
         $this->unassignUserCapability('moodle/cohort:assign', $context->id, $roleid);
+        $this->expectException(required_capability_exception::class);
         core_cohort_external::delete_cohort_members(array($cohortdel1, $cohortdel2));
     }
 
@@ -459,6 +515,7 @@ class core_cohort_externallib_testcase extends externallib_advanced_testcase {
      * Search cohorts.
      */
     public function test_search_cohorts() {
+        global $DB, $CFG;
         $this->resetAfterTest(true);
 
         $creator = $this->getDataGenerator()->create_user();
@@ -474,9 +531,7 @@ class core_cohort_externallib_testcase extends externallib_advanced_testcase {
         $coursecontext = context_course::instance($course->id);
 
         // Fetching default authenticated user role.
-        $userroles = get_archetype_roles('user');
-        $this->assertCount(1, $userroles);
-        $authrole = array_pop($userroles);
+        $authrole = $DB->get_record('role', array('id' => $CFG->defaultuserroleid));
 
         // Reset all default authenticated users permissions.
         unassign_capability('moodle/cohort:manage', $authrole->id);

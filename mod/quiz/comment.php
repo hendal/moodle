@@ -28,10 +28,11 @@ require_once('locallib.php');
 
 $attemptid = required_param('attempt', PARAM_INT);
 $slot = required_param('slot', PARAM_INT); // The question number in the attempt.
+$cmid = optional_param('cmid', null, PARAM_INT);
 
 $PAGE->set_url('/mod/quiz/comment.php', array('attempt' => $attemptid, 'slot' => $slot));
 
-$attemptobj = quiz_attempt::create($attemptid);
+$attemptobj = quiz_create_attempt_handling_errors($attemptid, $cmid);
 $student = $DB->get_record('user', array('id' => $attemptobj->get_userid()));
 
 // Can only grade finished attempts.
@@ -86,7 +87,7 @@ if (data_submitted() && confirm_sesskey()) {
 
         // Log this action.
         $params = array(
-            'objectid' => $attemptobj->get_question_attempt($slot)->get_question()->id,
+            'objectid' => $attemptobj->get_question_attempt($slot)->get_question_id(),
             'courseid' => $attemptobj->get_courseid(),
             'context' => context_module::instance($attemptobj->get_cmid()),
             'other' => array(

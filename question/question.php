@@ -32,7 +32,7 @@ require_once($CFG->libdir . '/formslib.php');
 // Read URL parameters telling us which question to edit.
 $id = optional_param('id', 0, PARAM_INT); // question id
 $makecopy = optional_param('makecopy', 0, PARAM_BOOL);
-$qtype = optional_param('qtype', '', PARAM_FILE);
+$qtype = optional_param('qtype', '', PARAM_COMPONENT);
 $categoryid = optional_param('category', 0, PARAM_INT);
 $cmid = optional_param('cmid', 0, PARAM_INT);
 $courseid = optional_param('courseid', 0, PARAM_INT);
@@ -162,6 +162,7 @@ if (isset($question->categoryobject)) {
 $question->formoptions = new stdClass();
 
 $categorycontext = context::instance_by_id($category->contextid);
+$question->contextid = $category->contextid;
 $addpermission = has_capability('moodle/question:add', $categorycontext);
 
 if ($id) {
@@ -177,6 +178,7 @@ if ($id) {
     if ($makecopy) {
         // If we are duplicating a question, add some indication to the question name.
         $question->name = get_string('questionnamecopy', 'question', $question->name);
+        $question->idnumber = core_question_find_next_unused_idnumber($question->idnumber, $category->id);
         $question->beingcopied = true;
     }
 
@@ -259,7 +261,7 @@ if ($mform->is_cancelled()) {
     // Ensure we redirect back to the category the question is being saved into.
     $returnurl->param('category', $fromform->category);
 
-    // We are acutally saving the question.
+    // We are actually saving the question.
     if (!empty($question->id)) {
         question_require_capability_on($question, 'edit');
     } else {

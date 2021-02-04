@@ -49,20 +49,8 @@ class core_questionlib_testcase extends advanced_testcase {
      *
      * This is executed before running any test in this file.
      */
-    public function setUp() {
+    public function setUp(): void {
         $this->resetAfterTest();
-    }
-
-    /**
-     * Return true and false to test functions with feedback on and off.
-     *
-     * @return array Test data
-     */
-    public function provider_feedback() {
-        return array(
-            'Feedback test' => array(true),
-            'No feedback test' => array(false)
-        );
     }
 
     /**
@@ -223,7 +211,7 @@ class core_questionlib_testcase extends advanced_testcase {
             'contextid' => $questioncat2->contextid)));
 
         // Now we want to test deleting the course category and moving the questions to another category.
-        question_delete_course_category($coursecat1, $coursecat2, false);
+        question_delete_course_category($coursecat1, $coursecat2);
 
         // Test that all tag_instances belong to one context.
         $this->assertEquals(8, $DB->count_records('tag_instance', array('component' => 'core_question',
@@ -274,6 +262,55 @@ class core_questionlib_testcase extends advanced_testcase {
     }
 
     /**
+     * Test that deleting a question from the question bank works in the normal case.
+     */
+    public function test_question_delete_question() {
+        global $DB;
+
+        // Setup.
+        $context = context_system::instance();
+        $qgen = $this->getDataGenerator()->get_plugin_generator('core_question');
+        $qcat = $qgen->create_question_category(array('contextid' => $context->id));
+        $q1 = $qgen->create_question('shortanswer', null, array('category' => $qcat->id));
+        $q2 = $qgen->create_question('shortanswer', null, array('category' => $qcat->id));
+
+        // Do.
+        question_delete_question($q1->id);
+
+        // Verify.
+        $this->assertFalse($DB->record_exists('question', ['id' => $q1->id]));
+        // Check that we did not delete too much.
+        $this->assertTrue($DB->record_exists('question', ['id' => $q2->id]));
+    }
+
+    /**
+     * Test that deleting a broken question from the question bank does not cause fatal errors.
+     */
+    public function test_question_delete_question_broken_data() {
+        global $DB;
+
+        // Setup.
+        $context = context_system::instance();
+        $qgen = $this->getDataGenerator()->get_plugin_generator('core_question');
+        $qcat = $qgen->create_question_category(array('contextid' => $context->id));
+        $q1 = $qgen->create_question('shortanswer', null, array('category' => $qcat->id));
+
+        // Now delete the category, to simulate what happens in old sites where
+        // referential integrity has failed.
+        $DB->delete_records('question_categories', ['id' => $qcat->id]);
+
+        // Do.
+        question_delete_question($q1->id);
+
+        // Verify.
+        $this->assertDebuggingCalled('Deleting question ' . $q1->id .
+                ' which is no longer linked to a context. Assuming system context ' .
+                'to avoid errors, but this may mean that some data like ' .
+                'files, tags, are not cleaned up.');
+        $this->assertFalse($DB->record_exists('question', ['id' => $q1->id]));
+    }
+
+    /**
      * This function tests the question_category_delete_safe function.
      */
     public function test_question_category_delete_safe() {
@@ -300,11 +337,8 @@ class core_questionlib_testcase extends advanced_testcase {
 
     /**
      * This function tests the question_delete_activity function.
-     *
-     * @param bool $feedback Whether to return feedback
-     * @dataProvider provider_feedback
      */
-    public function test_question_delete_activity($feedback) {
+    public function test_question_delete_activity() {
         global $DB;
         $this->resetAfterTest(true);
         $this->setAdminUser();
@@ -312,11 +346,9 @@ class core_questionlib_testcase extends advanced_testcase {
         list($category, $course, $quiz, $qcat, $questions) = $this->setup_quiz_and_questions();
 
         $cm = get_coursemodule_from_instance('quiz', $quiz->id);
-        // Test that the feedback works.
-        if ($feedback) {
-            $this->expectOutputRegex('|'.get_string('unusedcategorydeleted', 'question').'|');
-        }
-        question_delete_activity($cm, $feedback);
+
+        // Test the deletion.
+        question_delete_activity($cm);
 
         // Verify category deleted.
         $criteria = array('id' => $qcat->id);
@@ -347,31 +379,20 @@ class core_questionlib_testcase extends advanced_testcase {
         // Verify questions deleted or moved.
         $criteria = array('category' => $qcat->id);
         $this->assertEquals(0, $DB->count_records('question', $criteria));
-
-        // Test that the feedback works.
-        $expected[] = array('top', get_string('unusedcategorydeleted', 'question'));
-        $expected[] = array($qcat->name, get_string('unusedcategorydeleted', 'question'));
-        $this->assertEquals($expected, $result);
     }
 
     /**
      * This function tests the question_delete_course function.
-     *
-     * @param bool $feedback Whether to return feedback
-     * @dataProvider provider_feedback
      */
-    public function test_question_delete_course($feedback) {
+    public function test_question_delete_course() {
         global $DB;
         $this->resetAfterTest(true);
         $this->setAdminUser();
 
         list($category, $course, $quiz, $qcat, $questions) = $this->setup_quiz_and_questions('course');
 
-        // Test that the feedback works.
-        if ($feedback) {
-            $this->expectOutputRegex('|'.get_string('unusedcategorydeleted', 'question').'|');
-        }
-        question_delete_course($course, $feedback);
+        // Test the deletion.
+        question_delete_course($course);
 
         // Verify category deleted.
         $criteria = array('id' => $qcat->id);
@@ -384,11 +405,8 @@ class core_questionlib_testcase extends advanced_testcase {
 
     /**
      * This function tests the question_delete_course_category function.
-     *
-     * @param bool $feedback Whether to return feedback
-     * @dataProvider provider_feedback
      */
-    public function test_question_delete_course_category($feedback) {
+    public function test_question_delete_course_category() {
         global $DB;
         $this->resetAfterTest(true);
         $this->setAdminUser();
@@ -396,10 +414,7 @@ class core_questionlib_testcase extends advanced_testcase {
         list($category, $course, $quiz, $qcat, $questions) = $this->setup_quiz_and_questions('category');
 
         // Test that the feedback works.
-        if ($feedback) {
-            $this->expectOutputRegex('|'.get_string('unusedcategorydeleted', 'question').'|');
-        }
-        question_delete_course_category($category, 0, $feedback);
+        question_delete_course_category($category, null);
 
         // Verify category deleted.
         $criteria = array('id' => $qcat->id);
@@ -408,6 +423,98 @@ class core_questionlib_testcase extends advanced_testcase {
         // Verify questions deleted or moved.
         $criteria = array('category' => $qcat->id);
         $this->assertEquals(0, $DB->count_records('question', $criteria));
+    }
+
+    /**
+     * This function tests the question_delete_course_category function when it is supposed to move question categories.
+     */
+    public function test_question_delete_course_category_move_qcats() {
+        global $DB;
+        $this->resetAfterTest(true);
+        $this->setAdminUser();
+
+        list($category1, $course1, $quiz1, $qcat1, $questions1) = $this->setup_quiz_and_questions('category');
+        list($category2, $course2, $quiz2, $qcat2, $questions2) = $this->setup_quiz_and_questions('category');
+
+        $questionsinqcat1 = count($questions1);
+        $questionsinqcat2 = count($questions2);
+
+        // Test the delete.
+        question_delete_course_category($category1, $category2);
+
+        // Verify category not deleted.
+        $criteria = array('id' => $qcat1->id);
+        $this->assertEquals(1, $DB->count_records('question_categories', $criteria));
+
+        // Verify questions are moved.
+        $params = array($qcat2->contextid);
+        $actualquestionscount = $DB->count_records_sql("SELECT COUNT(*)
+                                                          FROM {question} q
+                                                          JOIN {question_categories} qc ON q.category = qc.id
+                                                         WHERE qc.contextid = ?", $params);
+        $this->assertEquals($questionsinqcat1 + $questionsinqcat2, $actualquestionscount);
+
+        // Verify there is just a single top-level category.
+        $criteria = array('contextid' => $qcat2->contextid, 'parent' => 0);
+        $this->assertEquals(1, $DB->count_records('question_categories', $criteria));
+
+        // Verify there is no question category in previous context.
+        $criteria = array('contextid' => $qcat1->contextid);
+        $this->assertEquals(0, $DB->count_records('question_categories', $criteria));
+    }
+
+    /**
+     * This function tests the question_save_from_deletion function when it is supposed to make a new category and
+     * move question categories to that new category.
+     */
+    public function test_question_save_from_deletion() {
+        global $DB;
+        $this->resetAfterTest(true);
+        $this->setAdminUser();
+
+        list($category, $course, $quiz, $qcat, $questions) = $this->setup_quiz_and_questions();
+
+        $context = context::instance_by_id($qcat->contextid);
+
+        $newcat = question_save_from_deletion(array_column($questions, 'id'),
+                $context->get_parent_context()->id, $context->get_context_name());
+
+        // Verify that the newcat itself is not a tep level category.
+        $this->assertNotEquals(0, $newcat->parent);
+
+        // Verify there is just a single top-level category.
+        $this->assertEquals(1, $DB->count_records('question_categories', ['contextid' => $qcat->contextid, 'parent' => 0]));
+    }
+
+    /**
+     * This function tests the question_save_from_deletion function when it is supposed to make a new category and
+     * move question categories to that new category when quiz name is very long but less than 256 characters.
+     */
+    public function test_question_save_from_deletion_quiz_with_long_name() {
+        global $DB;
+        $this->resetAfterTest(true);
+        $this->setAdminUser();
+
+        list($category, $course, $quiz, $qcat, $questions) = $this->setup_quiz_and_questions();
+
+        // Moodle doesn't allow you to enter a name longer than 255 characters.
+        $quiz->name = shorten_text(str_repeat('123456789 ', 26), 255);
+
+        $DB->update_record('quiz', $quiz);
+
+        $context = context::instance_by_id($qcat->contextid);
+
+        $newcat = question_save_from_deletion(array_column($questions, 'id'),
+                $context->get_parent_context()->id, $context->get_context_name());
+
+        // Verifying that the inserted record's name is expected or not.
+        $this->assertEquals($DB->get_record('question_categories', ['id' => $newcat->id])->name, $newcat->name);
+
+        // Verify that the newcat itself is not a top level category.
+        $this->assertNotEquals(0, $newcat->parent);
+
+        // Verify there is just a single top-level category.
+        $this->assertEquals(1, $DB->count_records('question_categories', ['contextid' => $qcat->contextid, 'parent' => 0]));
     }
 
     public function test_question_remove_stale_questions_from_category() {
@@ -1303,5 +1410,743 @@ class core_questionlib_testcase extends advanced_testcase {
                 }
             }
         }
+    }
+
+    /**
+     * question_sort_tags() includes the tags for all questions in the list.
+     */
+    public function test_question_sort_tags_includes_question_tags() {
+
+        list($category, $course, $quiz, $qcat, $questions) = $this->setup_quiz_and_questions('category');
+        $question1 = $questions[0];
+        $question2 = $questions[1];
+        $qcontext = context::instance_by_id($qcat->contextid);
+
+        core_tag_tag::set_item_tags('core_question', 'question', $question1->id, $qcontext, ['foo', 'bar']);
+        core_tag_tag::set_item_tags('core_question', 'question', $question2->id, $qcontext, ['baz', 'bop']);
+
+        foreach ($questions as $question) {
+            $tags = core_tag_tag::get_item_tags('core_question', 'question', $question->id);
+            $categorycontext = context::instance_by_id($qcat->contextid);
+            $tagobjects = question_sort_tags($tags, $categorycontext);
+            $expectedtags = [];
+            $actualtags = $tagobjects->tags;
+            foreach ($tagobjects->tagobjects as $tag) {
+                $expectedtags[$tag->id] = $tag->name;
+            }
+
+            // The question should have a tags property populated with each tag id
+            // and display name as a key vale pair.
+            $this->assertEquals($expectedtags, $actualtags);
+
+            $actualtagobjects = $tagobjects->tagobjects;
+            sort($tags);
+            sort($actualtagobjects);
+
+            // The question should have a full set of each tag object.
+            $this->assertEquals($tags, $actualtagobjects);
+            // The question should not have any course tags.
+            $this->assertEmpty($tagobjects->coursetagobjects);
+        }
+    }
+
+    /**
+     * question_sort_tags() includes course tags for all questions in the list.
+     */
+    public function test_question_sort_tags_includes_question_course_tags() {
+        global $DB;
+
+        list($category, $course, $quiz, $qcat, $questions) = $this->setup_quiz_and_questions('category');
+        $question1 = $questions[0];
+        $question2 = $questions[1];
+        $coursecontext = context_course::instance($course->id);
+
+        core_tag_tag::set_item_tags('core_question', 'question', $question1->id, $coursecontext, ['foo', 'bar']);
+        core_tag_tag::set_item_tags('core_question', 'question', $question2->id, $coursecontext, ['baz', 'bop']);
+
+        foreach ($questions as $question) {
+            $tags = core_tag_tag::get_item_tags('core_question', 'question', $question->id);
+            $tagobjects = question_sort_tags($tags, $qcat);
+
+            $expectedtags = [];
+            $actualtags = $tagobjects->coursetags;
+            foreach ($actualtags as $coursetagid => $coursetagname) {
+                $expectedtags[$coursetagid] = $coursetagname;
+            }
+
+            // The question should have a tags property populated with each tag id
+            // and display name as a key vale pair.
+            $this->assertEquals($expectedtags, $actualtags);
+
+            $actualtagobjects = $tagobjects->coursetagobjects;
+            sort($tags);
+            sort($actualtagobjects);
+
+            // The question should have a full set of each tag object.
+            $this->assertEquals($tags, $actualtagobjects);
+            // The question should not have any course tags.
+            $this->assertEmpty($tagobjects->tagobjects);
+        }
+    }
+
+    /**
+     * question_sort_tags() should return tags from all course contexts by default.
+     */
+    public function test_question_sort_tags_includes_multiple_courses_tags() {
+        global $DB;
+
+        list($category, $course, $quiz, $qcat, $questions) = $this->setup_quiz_and_questions('category');
+        $question1 = $questions[0];
+        $question2 = $questions[1];
+        $coursecontext = context_course::instance($course->id);
+        // Create a sibling course.
+        $siblingcourse = $this->getDataGenerator()->create_course(['category' => $course->category]);
+        $siblingcoursecontext = context_course::instance($siblingcourse->id);
+
+        // Create course tags.
+        core_tag_tag::set_item_tags('core_question', 'question', $question1->id, $coursecontext, ['c1']);
+        core_tag_tag::set_item_tags('core_question', 'question', $question2->id, $coursecontext, ['c1']);
+        core_tag_tag::set_item_tags('core_question', 'question', $question1->id, $siblingcoursecontext, ['c2']);
+        core_tag_tag::set_item_tags('core_question', 'question', $question2->id, $siblingcoursecontext, ['c2']);
+
+        foreach ($questions as $question) {
+            $tags = core_tag_tag::get_item_tags('core_question', 'question', $question->id);
+            $tagobjects = question_sort_tags($tags, $qcat);
+            $this->assertCount(2, $tagobjects->coursetagobjects);
+
+            foreach ($tagobjects->coursetagobjects as $tag) {
+                if ($tag->name == 'c1') {
+                    $this->assertEquals($coursecontext->id, $tag->taginstancecontextid);
+                } else {
+                    $this->assertEquals($siblingcoursecontext->id, $tag->taginstancecontextid);
+                }
+            }
+        }
+    }
+
+    /**
+     * question_sort_tags() should filter the course tags by the given list of courses.
+     */
+    public function test_question_sort_tags_includes_filter_course_tags() {
+        global $DB;
+
+        list($category, $course, $quiz, $qcat, $questions) = $this->setup_quiz_and_questions('category');
+        $question1 = $questions[0];
+        $question2 = $questions[1];
+        $coursecontext = context_course::instance($course->id);
+        // Create a sibling course.
+        $siblingcourse = $this->getDataGenerator()->create_course(['category' => $course->category]);
+        $siblingcoursecontext = context_course::instance($siblingcourse->id);
+
+        // Create course tags.
+        core_tag_tag::set_item_tags('core_question', 'question', $question1->id, $coursecontext, ['foo']);
+        core_tag_tag::set_item_tags('core_question', 'question', $question2->id, $coursecontext, ['bar']);
+        // Create sibling course tags. These should be filtered out.
+        core_tag_tag::set_item_tags('core_question', 'question', $question1->id, $siblingcoursecontext, ['filtered1']);
+        core_tag_tag::set_item_tags('core_question', 'question', $question2->id, $siblingcoursecontext, ['filtered2']);
+
+        foreach ($questions as $question) {
+            $tags = core_tag_tag::get_item_tags('core_question', 'question', $question->id);
+            $tagobjects = question_sort_tags($tags, $qcat, [$course]);
+            foreach ($tagobjects->coursetagobjects as $tag) {
+
+                // We should only be seeing course tags from $course. The tags from
+                // $siblingcourse should have been filtered out.
+                $this->assertEquals($coursecontext->id, $tag->taginstancecontextid);
+            }
+        }
+    }
+
+    /**
+     * Data provider for tests of question_has_capability_on_context and question_require_capability_on_context.
+     *
+     * @return  array
+     */
+    public function question_capability_on_question_provider() {
+        return [
+            'Unrelated capability which is present' => [
+                'capabilities' => [
+                    'moodle/question:config' => CAP_ALLOW,
+                ],
+                'testcapability' => 'config',
+                'isowner' => true,
+                'expect' => true,
+            ],
+            'Unrelated capability which is present (not owner)' => [
+                'capabilities' => [
+                    'moodle/question:config' => CAP_ALLOW,
+                ],
+                'testcapability' => 'config',
+                'isowner' => false,
+                'expect' => true,
+            ],
+            'Unrelated capability which is not set' => [
+                'capabilities' => [
+                ],
+                'testcapability' => 'config',
+                'isowner' => true,
+                'expect' => false,
+            ],
+            'Unrelated capability which is not set (not owner)' => [
+                'capabilities' => [
+                ],
+                'testcapability' => 'config',
+                'isowner' => false,
+                'expect' => false,
+            ],
+            'Unrelated capability which is prevented' => [
+                'capabilities' => [
+                    'moodle/question:config' => CAP_PREVENT,
+                ],
+                'testcapability' => 'config',
+                'isowner' => true,
+                'expect' => false,
+            ],
+            'Unrelated capability which is prevented (not owner)' => [
+                'capabilities' => [
+                    'moodle/question:config' => CAP_PREVENT,
+                ],
+                'testcapability' => 'config',
+                'isowner' => false,
+                'expect' => false,
+            ],
+            'Related capability which is not set' => [
+                'capabilities' => [
+                ],
+                'testcapability' => 'edit',
+                'isowner' => true,
+                'expect' => false,
+            ],
+            'Related capability which is not set (not owner)' => [
+                'capabilities' => [
+                ],
+                'testcapability' => 'edit',
+                'isowner' => false,
+                'expect' => false,
+            ],
+            'Related capability which is allowed at all, unset at mine' => [
+                'capabilities' => [
+                    'moodle/question:editall' => CAP_ALLOW,
+                ],
+                'testcapability' => 'edit',
+                'isowner' => true,
+                'expect' => true,
+            ],
+            'Related capability which is allowed at all, unset at mine (not owner)' => [
+                'capabilities' => [
+                    'moodle/question:editall' => CAP_ALLOW,
+                ],
+                'testcapability' => 'edit',
+                'isowner' => false,
+                'expect' => true,
+            ],
+            'Related capability which is allowed at all, prevented at mine' => [
+                'capabilities' => [
+                    'moodle/question:editall' => CAP_ALLOW,
+                    'moodle/question:editmine' => CAP_PREVENT,
+                ],
+                'testcapability' => 'edit',
+                'isowner' => true,
+                'expect' => true,
+            ],
+            'Related capability which is allowed at all, prevented at mine (not owner)' => [
+                'capabilities' => [
+                    'moodle/question:editall' => CAP_ALLOW,
+                    'moodle/question:editmine' => CAP_PREVENT,
+                ],
+                'testcapability' => 'edit',
+                'isowner' => false,
+                'expect' => true,
+            ],
+            'Related capability which is unset all, allowed at mine' => [
+                'capabilities' => [
+                    'moodle/question:editall' => CAP_PREVENT,
+                    'moodle/question:editmine' => CAP_ALLOW,
+                ],
+                'testcapability' => 'edit',
+                'isowner' => true,
+                'expect' => true,
+            ],
+            'Related capability which is unset all, allowed at mine (not owner)' => [
+                'capabilities' => [
+                    'moodle/question:editall' => CAP_PREVENT,
+                    'moodle/question:editmine' => CAP_ALLOW,
+                ],
+                'testcapability' => 'edit',
+                'isowner' => false,
+                'expect' => false,
+            ],
+        ];
+    }
+
+    /**
+     * Tests that question_has_capability_on does not throw exception on broken questions.
+     */
+    public function test_question_has_capability_on_broken_question() {
+        global $DB;
+
+        // Create the test data.
+        $generator = $this->getDataGenerator();
+        $questiongenerator = $generator->get_plugin_generator('core_question');
+
+        $category = $generator->create_category();
+        $context = context_coursecat::instance($category->id);
+        $questioncat = $questiongenerator->create_question_category([
+            'contextid' => $context->id,
+        ]);
+
+        // Create a cloze question.
+        $question = $questiongenerator->create_question('multianswer', null, [
+            'category' => $questioncat->id,
+        ]);
+        // Now, break the question.
+        $DB->delete_records('question_multianswer', ['question' => $question->id]);
+
+        $this->setAdminUser();
+
+        $result = question_has_capability_on($question->id, 'tag');
+        $this->assertTrue($result);
+
+        $this->assertDebuggingCalled();
+    }
+
+    /**
+     * Tests for the deprecated question_has_capability_on function when passing a stdClass as parameter.
+     *
+     * @dataProvider question_capability_on_question_provider
+     * @param   array   $capabilities The capability assignments to set.
+     * @param   string  $capability The capability to test
+     * @param   bool    $isowner Whether the user to create the question should be the owner or not.
+     * @param   bool    $expect The expected result.
+     */
+    public function test_question_has_capability_on_using_stdclass($capabilities, $capability, $isowner, $expect) {
+        $this->resetAfterTest();
+
+        // Create the test data.
+        $user = $this->getDataGenerator()->create_user();
+        $otheruser = $this->getDataGenerator()->create_user();
+        $roleid = $this->getDataGenerator()->create_role();
+        $category = $this->getDataGenerator()->create_category();
+        $context = context_coursecat::instance($category->id);
+
+        // Assign the user to the role.
+        role_assign($roleid, $user->id, $context->id);
+
+        // Assign the capabilities to the role.
+        foreach ($capabilities as $capname => $capvalue) {
+            assign_capability($capname, $capvalue, $roleid, $context->id);
+        }
+
+        $this->setUser($user);
+
+        // The current fake question we make use of is always a stdClass and typically has no ID.
+        $fakequestion = (object) [
+            'contextid' => $context->id,
+        ];
+
+        if ($isowner) {
+            $fakequestion->createdby = $user->id;
+        } else {
+            $fakequestion->createdby = $otheruser->id;
+        }
+
+        $result = question_has_capability_on($fakequestion, $capability);
+        $this->assertEquals($expect, $result);
+    }
+
+    /**
+     * Tests for the deprecated question_has_capability_on function when using question definition.
+     *
+     * @dataProvider question_capability_on_question_provider
+     * @param   array   $capabilities The capability assignments to set.
+     * @param   string  $capability The capability to test
+     * @param   bool    $isowner Whether the user to create the question should be the owner or not.
+     * @param   bool    $expect The expected result.
+     */
+    public function test_question_has_capability_on_using_question_definition($capabilities, $capability, $isowner, $expect) {
+        $this->resetAfterTest();
+
+        // Create the test data.
+        $generator = $this->getDataGenerator();
+        $questiongenerator = $generator->get_plugin_generator('core_question');
+        $user = $generator->create_user();
+        $otheruser = $generator->create_user();
+        $roleid = $generator->create_role();
+        $category = $generator->create_category();
+        $context = context_coursecat::instance($category->id);
+        $questioncat = $questiongenerator->create_question_category([
+            'contextid' => $context->id,
+        ]);
+
+        // Assign the user to the role.
+        role_assign($roleid, $user->id, $context->id);
+
+        // Assign the capabilities to the role.
+        foreach ($capabilities as $capname => $capvalue) {
+            assign_capability($capname, $capvalue, $roleid, $context->id);
+        }
+
+        // Create the question.
+        $qtype = 'truefalse';
+        $overrides = [
+            'category' => $questioncat->id,
+        ];
+
+        $question = $questiongenerator->create_question($qtype, null, $overrides);
+
+        // The question generator does not support setting of the createdby for some reason.
+        $question->createdby = ($isowner) ? $user->id : $otheruser->id;
+        $fromform = test_question_maker::get_question_form_data($qtype, null);
+        $fromform = (object) $generator->combine_defaults_and_record((array) $fromform, $overrides);
+        question_bank::get_qtype($qtype)->save_question($question, $fromform);
+
+        $this->setUser($user);
+        $result = question_has_capability_on($question, $capability);
+        $this->assertEquals($expect, $result);
+    }
+
+    /**
+     * Tests for the deprecated question_has_capability_on function when using a real question id.
+     *
+     * @dataProvider question_capability_on_question_provider
+     * @param   array   $capabilities The capability assignments to set.
+     * @param   string  $capability The capability to test
+     * @param   bool    $isowner Whether the user to create the question should be the owner or not.
+     * @param   bool    $expect The expected result.
+     */
+    public function test_question_has_capability_on_using_question_id($capabilities, $capability, $isowner, $expect) {
+        $this->resetAfterTest();
+
+        // Create the test data.
+        $generator = $this->getDataGenerator();
+        $questiongenerator = $generator->get_plugin_generator('core_question');
+        $user = $generator->create_user();
+        $otheruser = $generator->create_user();
+        $roleid = $generator->create_role();
+        $category = $generator->create_category();
+        $context = context_coursecat::instance($category->id);
+        $questioncat = $questiongenerator->create_question_category([
+            'contextid' => $context->id,
+        ]);
+
+        // Assign the user to the role.
+        role_assign($roleid, $user->id, $context->id);
+
+        // Assign the capabilities to the role.
+        foreach ($capabilities as $capname => $capvalue) {
+            assign_capability($capname, $capvalue, $roleid, $context->id);
+        }
+
+        // Create the question.
+        $qtype = 'truefalse';
+        $overrides = [
+            'category' => $questioncat->id,
+        ];
+
+        $question = $questiongenerator->create_question($qtype, null, $overrides);
+
+        // The question generator does not support setting of the createdby for some reason.
+        $question->createdby = ($isowner) ? $user->id : $otheruser->id;
+        $fromform = test_question_maker::get_question_form_data($qtype, null);
+        $fromform = (object) $generator->combine_defaults_and_record((array) $fromform, $overrides);
+        question_bank::get_qtype($qtype)->save_question($question, $fromform);
+
+        $this->setUser($user);
+        $result = question_has_capability_on($question->id, $capability);
+        $this->assertEquals($expect, $result);
+    }
+
+    /**
+     * Tests for the deprecated question_has_capability_on function when using a string as question id.
+     *
+     * @dataProvider question_capability_on_question_provider
+     * @param   array   $capabilities The capability assignments to set.
+     * @param   string  $capability The capability to test
+     * @param   bool    $isowner Whether the user to create the question should be the owner or not.
+     * @param   bool    $expect The expected result.
+     */
+    public function test_question_has_capability_on_using_question_string_id($capabilities, $capability, $isowner, $expect) {
+        $this->resetAfterTest();
+
+        // Create the test data.
+        $generator = $this->getDataGenerator();
+        $questiongenerator = $generator->get_plugin_generator('core_question');
+        $user = $generator->create_user();
+        $otheruser = $generator->create_user();
+        $roleid = $generator->create_role();
+        $category = $generator->create_category();
+        $context = context_coursecat::instance($category->id);
+        $questioncat = $questiongenerator->create_question_category([
+            'contextid' => $context->id,
+        ]);
+
+        // Assign the user to the role.
+        role_assign($roleid, $user->id, $context->id);
+
+        // Assign the capabilities to the role.
+        foreach ($capabilities as $capname => $capvalue) {
+            assign_capability($capname, $capvalue, $roleid, $context->id);
+        }
+
+        // Create the question.
+        $qtype = 'truefalse';
+        $overrides = [
+            'category' => $questioncat->id,
+        ];
+
+        $question = $questiongenerator->create_question($qtype, null, $overrides);
+
+        // The question generator does not support setting of the createdby for some reason.
+        $question->createdby = ($isowner) ? $user->id : $otheruser->id;
+        $fromform = test_question_maker::get_question_form_data($qtype, null);
+        $fromform = (object) $generator->combine_defaults_and_record((array) $fromform, $overrides);
+        question_bank::get_qtype($qtype)->save_question($question, $fromform);
+
+        $this->setUser($user);
+        $result = question_has_capability_on((string) $question->id, $capability);
+        $this->assertEquals($expect, $result);
+    }
+
+    /**
+     * Tests for the question_has_capability_on function when using a moved question.
+     *
+     * @dataProvider question_capability_on_question_provider
+     * @param   array   $capabilities The capability assignments to set.
+     * @param   string  $capability The capability to test
+     * @param   bool    $isowner Whether the user to create the question should be the owner or not.
+     * @param   bool    $expect The expected result.
+     */
+    public function test_question_has_capability_on_using_moved_question($capabilities, $capability, $isowner, $expect) {
+        $this->resetAfterTest();
+
+        // Create the test data.
+        $generator = $this->getDataGenerator();
+        $questiongenerator = $generator->get_plugin_generator('core_question');
+        $user = $generator->create_user();
+        $otheruser = $generator->create_user();
+        $roleid = $generator->create_role();
+        $category = $generator->create_category();
+        $context = context_coursecat::instance($category->id);
+        $questioncat = $questiongenerator->create_question_category([
+            'contextid' => $context->id,
+        ]);
+
+        $newcategory = $generator->create_category();
+        $newcontext = context_coursecat::instance($newcategory->id);
+        $newquestioncat = $questiongenerator->create_question_category([
+            'contextid' => $newcontext->id,
+        ]);
+
+        // Assign the user to the role in the _new_ context..
+        role_assign($roleid, $user->id, $newcontext->id);
+
+        // Assign the capabilities to the role in the _new_ context.
+        foreach ($capabilities as $capname => $capvalue) {
+            assign_capability($capname, $capvalue, $roleid, $newcontext->id);
+        }
+
+        // Create the question.
+        $qtype = 'truefalse';
+        $overrides = [
+            'category' => $questioncat->id,
+        ];
+
+        $question = $questiongenerator->create_question($qtype, null, $overrides);
+
+        // The question generator does not support setting of the createdby for some reason.
+        $question->createdby = ($isowner) ? $user->id : $otheruser->id;
+        $fromform = test_question_maker::get_question_form_data($qtype, null);
+        $fromform = (object) $generator->combine_defaults_and_record((array) $fromform, $overrides);
+        question_bank::get_qtype($qtype)->save_question($question, $fromform);
+
+        // Move the question.
+        question_move_questions_to_category([$question->id], $newquestioncat->id);
+
+        // Test that the capability is correct after the question has been moved.
+        $this->setUser($user);
+        $result = question_has_capability_on($question->id, $capability);
+        $this->assertEquals($expect, $result);
+    }
+
+    /**
+     * Tests for the question_has_capability_on function when using a real question.
+     *
+     * @dataProvider question_capability_on_question_provider
+     * @param   array   $capabilities The capability assignments to set.
+     * @param   string  $capability The capability to test
+     * @param   bool    $isowner Whether the user to create the question should be the owner or not.
+     * @param   bool    $expect The expected result.
+     */
+    public function test_question_has_capability_on_using_question($capabilities, $capability, $isowner, $expect) {
+        $this->resetAfterTest();
+
+        // Create the test data.
+        $generator = $this->getDataGenerator();
+        $questiongenerator = $generator->get_plugin_generator('core_question');
+        $user = $generator->create_user();
+        $otheruser = $generator->create_user();
+        $roleid = $generator->create_role();
+        $category = $generator->create_category();
+        $context = context_coursecat::instance($category->id);
+        $questioncat = $questiongenerator->create_question_category([
+            'contextid' => $context->id,
+        ]);
+
+        // Assign the user to the role.
+        role_assign($roleid, $user->id, $context->id);
+
+        // Assign the capabilities to the role.
+        foreach ($capabilities as $capname => $capvalue) {
+            assign_capability($capname, $capvalue, $roleid, $context->id);
+        }
+
+        // Create the question.
+        $question = $questiongenerator->create_question('truefalse', null, [
+            'category' => $questioncat->id,
+        ]);
+        $question = question_bank::load_question_data($question->id);
+
+        // The question generator does not support setting of the createdby for some reason.
+        $question->createdby = ($isowner) ? $user->id : $otheruser->id;
+
+        $this->setUser($user);
+        $result = question_has_capability_on($question, $capability);
+        $this->assertEquals($expect, $result);
+    }
+
+    /**
+     * Tests that question_has_capability_on throws an exception for wrong parameter types.
+     */
+    public function test_question_has_capability_on_wrong_param_type() {
+        // Create the test data.
+        $generator = $this->getDataGenerator();
+        $questiongenerator = $generator->get_plugin_generator('core_question');
+        $user = $generator->create_user();
+
+        $category = $generator->create_category();
+        $context = context_coursecat::instance($category->id);
+        $questioncat = $questiongenerator->create_question_category([
+            'contextid' => $context->id,
+        ]);
+
+        // Create the question.
+        $question = $questiongenerator->create_question('truefalse', null, [
+            'category' => $questioncat->id,
+        ]);
+        $question = question_bank::load_question_data($question->id);
+
+        // The question generator does not support setting of the createdby for some reason.
+        $question->createdby = $user->id;
+
+        $this->setUser($user);
+        $result = question_has_capability_on((string)$question->id, 'tag');
+        $this->assertFalse($result);
+
+        $this->expectException('coding_exception');
+        $this->expectExceptionMessage('$questionorid parameter needs to be an integer or an object.');
+        question_has_capability_on('one', 'tag');
+    }
+
+    /**
+     * Test of question_categorylist_parents function.
+     */
+    public function test_question_categorylist_parents() {
+        $this->resetAfterTest();
+        $generator = $this->getDataGenerator();
+        $questiongenerator = $generator->get_plugin_generator('core_question');
+        $category = $generator->create_category();
+        $context = context_coursecat::instance($category->id);
+        // Create a top category.
+        $cat0 = question_get_top_category($context->id, true);
+        // Add sub-categories.
+        $cat1 = $questiongenerator->create_question_category(['parent' => $cat0->id]);
+        $cat2 = $questiongenerator->create_question_category(['parent' => $cat1->id]);
+        // Test the 'get parents' function.
+        $parentcategories = question_categorylist_parents($cat2->id);
+        $this->assertEquals($cat0->id, $parentcategories[0]);
+        $this->assertEquals($cat1->id, $parentcategories[1]);
+        $this->assertCount(2, $parentcategories);
+    }
+
+    public function test_question_get_export_single_question_url() {
+        $generator = $this->getDataGenerator();
+
+        // Create a course and an activity.
+        $course = $generator->create_course();
+        $quiz = $generator->create_module('quiz', ['course' => $course->id]);
+
+        // Create a question in each place.
+        $questiongenerator = $generator->get_plugin_generator('core_question');
+        $courseqcat = $questiongenerator->create_question_category(['contextid' => context_course::instance($course->id)->id]);
+        $courseq = $questiongenerator->create_question('truefalse', null, ['category' => $courseqcat->id]);
+        $quizqcat = $questiongenerator->create_question_category(['contextid' => context_module::instance($quiz->cmid)->id]);
+        $quizq = $questiongenerator->create_question('truefalse', null, ['category' => $quizqcat->id]);
+        $systemqcat = $questiongenerator->create_question_category();
+        $systemq = $questiongenerator->create_question('truefalse', null, ['category' => $systemqcat->id]);
+
+        // Verify some URLs.
+        $this->assertEquals(new moodle_url('/question/exportone.php',
+                ['id' => $courseq->id, 'courseid' => $course->id, 'sesskey' => sesskey()]),
+                question_get_export_single_question_url(question_bank::load_question_data($courseq->id)));
+
+        $this->assertEquals(new moodle_url('/question/exportone.php',
+                ['id' => $quizq->id, 'cmid' => $quiz->cmid, 'sesskey' => sesskey()]),
+                question_get_export_single_question_url(question_bank::load_question($quizq->id)));
+
+        $this->assertEquals(new moodle_url('/question/exportone.php',
+                ['id' => $systemq->id, 'courseid' => SITEID, 'sesskey' => sesskey()]),
+                question_get_export_single_question_url(question_bank::load_question($systemq->id)));
+    }
+
+    /**
+     * Get test cases for test_core_question_find_next_unused_idnumber.
+     *
+     * @return array test cases.
+     */
+    public function find_next_unused_idnumber_cases(): array {
+        return [
+            ['id', null],
+            ['id1a', null],
+            ['id001', 'id002'],
+            ['id9', 'id10'],
+            ['id009', 'id010'],
+            ['id999', 'id1000'],
+            ['0', '1'],
+            ['-1', '-2'],
+            ['01', '02'],
+            ['09', '10'],
+            ['1.0E+29', '1.0E+30'], // Idnumbers are strings, not floats.
+            ['1.0E-29', '1.0E-30'], // By the way, this is not a sensible idnumber!
+            ['10.1', '10.2'],
+            ['10.9', '10.10'],
+
+        ];
+    }
+
+    /**
+     * Test core_question_find_next_unused_idnumber in the case when there are no other questions.
+     *
+     * @dataProvider find_next_unused_idnumber_cases
+     * @param string $oldidnumber value to pass to core_question_find_next_unused_idnumber.
+     * @param string|null $expectednewidnumber expected result.
+     */
+    public function test_core_question_find_next_unused_idnumber(string $oldidnumber, ?string $expectednewidnumber) {
+        $this->assertSame($expectednewidnumber, core_question_find_next_unused_idnumber($oldidnumber, 0));
+    }
+
+    public function test_core_question_find_next_unused_idnumber_skips_used() {
+        $this->resetAfterTest();
+
+        /** @var core_question_generator $generator */
+        $generator = $this->getDataGenerator()->get_plugin_generator('core_question');
+        $category = $generator->create_question_category();
+        $othercategory = $generator->create_question_category();
+        $generator->create_question('truefalse', null, ['category' => $category->id, 'idnumber' => 'id9']);
+        $generator->create_question('truefalse', null, ['category' => $category->id, 'idnumber' => 'id10']);
+        // Next one to make sure only idnumbers from the right category are ruled out.
+        $generator->create_question('truefalse', null, ['category' => $othercategory->id, 'idnumber' => 'id11']);
+
+        $this->assertSame('id11', core_question_find_next_unused_idnumber('id9', $category->id));
+        $this->assertSame('id11', core_question_find_next_unused_idnumber('id8', $category->id));
     }
 }

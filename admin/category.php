@@ -30,7 +30,6 @@ $category = required_param('category', PARAM_SAFEDIR);
 $return = optional_param('return','', PARAM_ALPHA);
 $adminediting = optional_param('adminedit', -1, PARAM_BOOL);
 
-/// no guest autologin
 require_login(0, false);
 $PAGE->set_context(context_system::instance());
 $PAGE->set_url('/admin/category.php', array('category' => $category));
@@ -75,7 +74,7 @@ if ($data = data_submitted() and confirm_sesskey()) {
 if ($PAGE->user_allowed_editing() && $adminediting != -1) {
     $USER->editing = $adminediting;
 }
-
+$buttons = null;
 if ($PAGE->user_allowed_editing()) {
     $url = clone($PAGE->url);
     if ($PAGE->user_is_editing()) {
@@ -129,7 +128,9 @@ if ($savebutton) {
 $visiblepathtosection = array_reverse($settingspage->visiblepath);
 $PAGE->set_title("$SITE->shortname: " . implode(": ",$visiblepathtosection));
 $PAGE->set_heading($SITE->fullname);
-$PAGE->set_button($buttons);
+if ($buttons) {
+    $PAGE->set_button($buttons);
+}
 
 echo $OUTPUT->header();
 

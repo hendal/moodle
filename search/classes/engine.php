@@ -75,13 +75,22 @@ abstract class engine {
     protected $pluginname = null;
 
     /**
+     * @var bool If true, should skip schema validity check when checking the search engine is ready
+     */
+    protected $skipschemacheck = false;
+
+    /**
      * Initialises the search engine configuration.
      *
      * Search engine availability should be checked separately.
      *
+     * The alternate configuration option is only used to construct a special second copy of the
+     * search engine object, as described in {@see has_alternate_configuration}.
+     *
+     * @param bool $alternateconfiguration If true, use alternate configuration settings
      * @return void
      */
-    public function __construct() {
+    public function __construct(bool $alternateconfiguration = false) {
 
         $classname = get_class($this);
         if (strpos($classname, '\\') === false) {
@@ -97,6 +106,19 @@ abstract class engine {
         } else {
             $this->config = new stdClass();
         }
+
+        // For alternate configuration, automatically replace normal configuration values with
+        // those beginning with 'alternate'.
+        if ($alternateconfiguration) {
+            foreach ((array)$this->config as $key => $value) {
+                if (preg_match('~^alternate(.*)$~', $key, $matches)) {
+                    $this->config->{$matches[1]} = $value;
+                }
+            }
+        }
+
+        // Flag just in case engine needs to know it is using the alternate configuration.
+        $this->config->alternateconfiguration = $alternateconfiguration;
     }
 
     /**
@@ -132,6 +154,15 @@ abstract class engine {
             self::$cachedusers[$userid] = $DB->get_record('user', array('id' => $userid), 'id, ' . $fields);
         }
         return self::$cachedusers[$userid];
+    }
+
+    /**
+     * Clears the users cache.
+     *
+     * @return null
+     */
+    public static function clear_users_cache() {
+        self::$cachedusers = [];
     }
 
     /**
@@ -185,6 +216,7 @@ abstract class engine {
         $doc->set_data_from_engine($docdata);
         $doc->set_doc_url($searcharea->get_doc_url($doc));
         $doc->set_context_url($searcharea->get_context_url($doc));
+        $doc->set_doc_icon($searcharea->get_doc_icon($doc));
 
         // Uses the internal caches to get required data needed to render the document later.
         $course = $this->get_course($doc->get('courseid'));
@@ -203,8 +235,8 @@ abstract class engine {
      * and and have the search engine back end add them
      * to the index.
      *
-     * @param iterator $iterator the iterator of documents to index
-     * @param searcharea $searcharea the area for the documents to index
+     * @param \iterator $iterator the iterator of documents to index
+     * @param base $searcharea the area for the documents to index
      * @param array $options document indexing options
      * @return array Processed document counts
      */
@@ -212,10 +244,14 @@ abstract class engine {
         $numrecords = 0;
         $numdocs = 0;
         $numdocsignored = 0;
+        $numbatches = 0;
         $lastindexeddoc = 0;
         $firstindexeddoc = 0;
         $partial = false;
         $lastprogress = manager::get_current_time();
+
+        $batchmode = $this->supports_add_document_batch();
+        $currentbatch = [];
 
         foreach ($iterator as $document) {
             // Stop if we have exceeded the time limit (and there are still more items). Always
@@ -240,10 +276,22 @@ abstract class engine {
                 $searcharea->attach_files($document);
             }
 
-            if ($this->add_document($document, $options['indexfiles'])) {
-                $numdocs++;
+            if ($batchmode && strlen($document->get('content')) <= $this->get_batch_max_content()) {
+                $currentbatch[] = $document;
+                if (count($currentbatch) >= $this->get_batch_max_documents()) {
+                    [$processed, $failed, $batches] = $this->add_document_batch($currentbatch, $options['indexfiles']);
+                    $numdocs += $processed;
+                    $numdocsignored += $failed;
+                    $numbatches += $batches;
+                    $currentbatch = [];
+                }
             } else {
-                $numdocsignored++;
+                if ($this->add_document($document, $options['indexfiles'])) {
+                    $numdocs++;
+                } else {
+                    $numdocsignored++;
+                }
+                $numbatches++;
             }
 
             $lastindexeddoc = $document->get('modified');
@@ -264,7 +312,15 @@ abstract class engine {
             }
         }
 
-        return array($numrecords, $numdocs, $numdocsignored, $lastindexeddoc, $partial);
+        // Add remaining documents from batch.
+        if ($batchmode && $currentbatch) {
+            [$processed, $failed, $batches] = $this->add_document_batch($currentbatch, $options['indexfiles']);
+            $numdocs += $processed;
+            $numdocsignored += $failed;
+            $numbatches += $batches;
+        }
+
+        return [$numrecords, $numdocs, $numdocsignored, $lastindexeddoc, $partial, $numbatches];
     }
 
     /**
@@ -355,6 +411,8 @@ abstract class engine {
      */
     public function optimize() {
         // Nothing by default.
+        mtrace('The ' . get_string('pluginname', $this->get_plugin_name()) .
+                ' search engine does not require automatic optimization.');
     }
 
     /**
@@ -417,9 +475,37 @@ abstract class engine {
      *
      * This should also check that the search engine configuration is ok.
      *
+     * If the function $this->should_skip_schema_check() returns true, then this function may leave
+     * out time-consuming checks that the schema is valid. (This allows for improved performance on
+     * critical pages such as the main search form.)
+     *
      * @return true|string Returns true if all good or an error string.
      */
     abstract function is_server_ready();
+
+    /**
+     * Tells the search engine to skip any time-consuming checks that it might do as part of the
+     * is_server_ready function, and only carry out a basic check that it can contact the server.
+     *
+     * This setting is not remembered and applies only to the current request.
+     *
+     * @since Moodle 3.5
+     * @param bool $skip True to skip the checks, false to start checking again
+     */
+    public function skip_schema_check($skip = true) {
+        $this->skipschemacheck = $skip;
+    }
+
+    /**
+     * For use by subclasses. The engine can call this inside is_server_ready to check whether it
+     * should skip time-consuming schema checks.
+     *
+     * @since Moodle 3.5
+     * @return bool True if schema checks should be skipped
+     */
+    protected function should_skip_schema_check() {
+        return $this->skipschemacheck;
+    }
 
     /**
      * Adds a document to the search engine.
@@ -429,6 +515,27 @@ abstract class engine {
      * @return bool    False if the file was skipped or failed, true on success
      */
     abstract function add_document($document, $fileindexing = false);
+
+    /**
+     * Adds multiple documents to the search engine.
+     *
+     * It should return the number successfully processed, and the number of batches they were
+     * processed in (for example if you add 100 documents and there is an error processing one of
+     * those documents, and it took 4 batches, it would return [99, 1, 4]).
+     *
+     * If the engine implements this, it should return true to {@see supports_add_document_batch}.
+     *
+     * The system will only call this function with up to {@see get_batch_max_documents} documents,
+     * and each document in the batch will have content no larger than specified by
+     * {@see get_batch_max_content}.
+     *
+     * @param document[] $documents Documents to add
+     * @param bool $fileindexing True if file indexing is to be used
+     * @return int[] Array of three elements, successfully processed, failed processed, batch count
+     */
+    public function add_document_batch(array $documents, bool $fileindexing = false): array {
+        throw new \coding_exception('add_document_batch not supported by this engine');
+    }
 
     /**
      * Executes the query on the engine.
@@ -477,6 +584,47 @@ abstract class engine {
      * @return void
      */
     abstract function delete($areaid = null);
+
+    /**
+     * Deletes information related to a specific context id. This should be used when the context
+     * itself is deleted from Moodle.
+     *
+     * This only deletes information for the specified context - not for any child contexts.
+     *
+     * This function is optional; if not supported it will return false and the information will
+     * not be deleted from the search index.
+     *
+     * If an engine implements this function it should also implement delete_index_for_course;
+     * otherwise, nothing will be deleted when users delete an entire course at once.
+     *
+     * @param int $oldcontextid ID of context that has been deleted
+     * @return bool True if implemented
+     * @throws \core_search\engine_exception Engines may throw this exception for any problem
+     */
+    public function delete_index_for_context(int $oldcontextid) {
+        return false;
+    }
+
+    /**
+     * Deletes information related to a specific course id. This should be used when the course
+     * itself is deleted from Moodle.
+     *
+     * This deletes all information relating to that course from the index, including all child
+     * contexts.
+     *
+     * This function is optional; if not supported it will return false and the information will
+     * not be deleted from the search index.
+     *
+     * If an engine implements this function then, ideally, it should also implement
+     * delete_index_for_context so that deletion of single activities/blocks also works.
+     *
+     * @param int $oldcourseid ID of course that has been deleted
+     * @return bool True if implemented
+     * @throws \core_search\engine_exception Engines may throw this exception for any problem
+     */
+    public function delete_index_for_course(int $oldcourseid) {
+        return false;
+    }
 
     /**
      * Checks that the schema is the latest version. If the version stored in config does not match
@@ -541,6 +689,92 @@ abstract class engine {
      * @return bool True if this engine supports searching by group id field
      */
     public function supports_group_filtering() {
+        return false;
+    }
+
+    /**
+     * Obtain a list of results orders (and names for them) that are supported by this
+     * search engine in the given context.
+     *
+     * By default, engines sort by relevance only.
+     *
+     * @param \context $context Context that the user requested search from
+     * @return array Array from order name => display text
+     */
+    public function get_supported_orders(\context $context) {
+        return ['relevance' => get_string('order_relevance', 'search')];
+    }
+
+    /**
+     * Checks if the search engine supports searching by user.
+     *
+     * If it returns true to this function, the search engine should support the 'userids' option
+     * in the $filters value passed to execute_query(), returning only items where the userid in
+     * the search document matches one of those user ids.
+     *
+     * @return bool True if the search engine supports searching by user
+     */
+    public function supports_users() {
+        return false;
+    }
+
+    /**
+     * Checks if the search engine supports adding documents in a batch.
+     *
+     * If it returns true to this function, the search engine must implement the add_document_batch
+     * function.
+     *
+     * @return bool True if the search engine supports adding documents in a batch
+     */
+    public function supports_add_document_batch(): bool {
+        return false;
+    }
+
+    /**
+     * Gets the maximum number of documents to send together in batch mode.
+     *
+     * Only relevant if the engine returns true to {@see supports_add_document_batch}.
+     *
+     * Can be overridden by search engine if required.
+     *
+     * @var int Number of documents to send together in batch mode, default 100.
+     */
+    public function get_batch_max_documents(): int {
+        return 100;
+    }
+
+    /**
+     * Gets the maximum size of document content to be included in a shared batch (if the
+     * document is bigger then it will be sent on its own; batching does not provide a performance
+     * improvement for big documents anyway).
+     *
+     * Only relevant if the engine returns true to {@see supports_add_document_batch}.
+     *
+     * Can be overridden by search engine if required.
+     *
+     * @return int Max size in bytes, default 1MB
+     */
+    public function get_batch_max_content(): int {
+        return 1024 * 1024;
+    }
+
+    /**
+     * Checks if the search engine has an alternate configuration.
+     *
+     * This is used where the same search engine class supports two different configurations,
+     * which are both shown on the settings screen. The alternate configuration is selected by
+     * passing 'true' parameter to the constructor.
+     *
+     * The feature is used when a different connection is in use for indexing vs. querying
+     * the search engine.
+     *
+     * This function should only return true if the engine supports an alternate configuration
+     * and the user has filled in the settings. (We do not need to test they are valid, that will
+     * happen as normal.)
+     *
+     * @return bool True if an alternate configuration is defined
+     */
+    public function has_alternate_configuration(): bool {
         return false;
     }
 }

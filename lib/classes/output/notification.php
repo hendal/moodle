@@ -84,9 +84,10 @@ class notification implements \renderable, \templatable {
      * Notification constructor.
      *
      * @param string $message the message to print out
-     * @param string $messagetype one of the NOTIFY_* constants..
+     * @param ?string $messagetype one of the NOTIFY_* constants..
+     * @param bool $closebutton Whether to show a close icon to remove the notification (default true).
      */
-    public function __construct($message, $messagetype = null) {
+    public function __construct($message, $messagetype = null, $closebutton = true) {
         $this->message = $message;
 
         if (empty($messagetype)) {
@@ -94,6 +95,8 @@ class notification implements \renderable, \templatable {
         }
 
         $this->messagetype = $messagetype;
+
+        $this->closebutton = $closebutton;
     }
 
     /**
@@ -162,6 +165,10 @@ class notification implements \renderable, \templatable {
             'extraclasses'  => implode(' ', $this->extraclasses),
             'announce'      => $this->announce,
             'closebutton'   => $this->closebutton,
+            'issuccess'         => $this->messagetype === 'success',
+            'isinfo'            => $this->messagetype === 'info',
+            'iswarning'         => $this->messagetype === 'warning',
+            'iserror'           => $this->messagetype === 'error',
         );
     }
 
